@@ -103,6 +103,11 @@ class Book:
 
     @classmethod
     def from_dict(cls, d: dict) -> Book:
+        # /students/:id/books wraps the full book data in a "BookView" key;
+        # merge it so all fields are accessible at the top level.
+        if "BookView" in d:
+            d = {**d, **d["BookView"]}
+
         series = Series.from_dict(d["series"]) if d.get("series") else None
         # JSON key is "Student" (uppercase) when nested in book response
         raw_student = d.get("Student") or d.get("student_obj")
