@@ -78,22 +78,17 @@ class AusleiheClient:
         resp.raise_for_status()
 
         inputs = self._extract_form_inputs(resp.text)
-        csrf_token = inputs.get("_token")
-        if not csrf_token:
-            found = list(inputs.keys())
-            raise AuthError(
-                f"CSRF-Token nicht gefunden (URL: {resp.url}, "
-                f"gefundene Felder: {found})"
-            )
 
-        # resp.url is already the login form URL with ?_target_path=... in the query string
+        # Build POST body from all form inputs present, then override credentials.
+        # The CSRF token (_token) is not always present depending on IServ version.
+        post_data = {k: v for k, v in inputs.items()}
+        post_data["_username"] = self._username
+        post_data["_password"] = self._password
+
+        # resp.url is the login form URL and already contains ?_target_path=...
         post_resp = self._session.post(
             resp.url,
-            data={
-                "_username": self._username,
-                "_password": self._password,
-                "_token": csrf_token,
-            },
+            data=post_data,
             allow_redirects=True,
         )
 
