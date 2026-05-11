@@ -54,24 +54,24 @@ class AusleiheClient:
     # ------------------------------------------------------------------
 
     def _login(self) -> None:
-        login_url = f"{self._iserv_base}/iserv/login"
-        resp = self._session.get(login_url, allow_redirects=True)
+        resp = self._session.get(f"{self._iserv_base}/iserv/login", allow_redirects=True)
         resp.raise_for_status()
 
-        # Extract CSRF token from the final login form
-        match = re.search(r'name="_token"\s+value="([^"]+)"', resp.text)
+        # Attribute order within <input> tags varies — match both orderings
+        match = (
+            re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
+            or re.search(r'<input[^>]+value="([^"]+)"[^>]+name="_token"', resp.text)
+        )
         if not match:
-            raise AuthError("CSRF-Token nicht gefunden. Login-Seite hat unerwartetes Format.")
+            raise AuthError(
+                f"CSRF-Token nicht gefunden (finale URL: {resp.url}). "
+                "Login-Seite hat unerwartetes Format."
+            )
         csrf_token = match.group(1)
 
-        # The _target_path must be the OAuth2 redirect URL that was the destination
-        # of the redirect chain we just followed.
-        target_path = resp.url.split(self._iserv_base)[-1] if self._iserv_base in resp.url else resp.url
-
-        post_url = f"{self._iserv_base}/iserv/auth/login"
+        # resp.url is already the login form URL with ?_target_path=... in the query string
         post_resp = self._session.post(
-            post_url,
-            params={"_target_path": target_path},
+            resp.url,
             data={
                 "_username": self._username,
                 "_password": self._password,
@@ -80,8 +80,6 @@ class AusleiheClient:
             allow_redirects=True,
         )
 
-        # Successful login redirects through the OAuth2 code flow.
-        # The session cookie IServAuthSession is now set.
         if "authentication/redirect" not in post_resp.url and post_resp.status_code not in (200, 302):
             raise AuthError(f"Login fehlgeschlagen (Status {post_resp.status_code}). Zugangsdaten prüfen.")
 
