@@ -12,4 +12,8 @@ __all__ = [
     "AuthError",
     "NotFoundError",
     "ForbiddenError",
+    # Sub-APIs (als Type-Hints nutzbar)
+    "AdminAPI",
 ]
+
+from .admin import AdminAPI  # noqa: E402

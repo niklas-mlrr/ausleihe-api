@@ -11,6 +11,7 @@ import requests
 from .exceptions import AusleiheError, AuthError, ForbiddenError, NotFoundError
 
 if TYPE_CHECKING:
+    from .admin import AdminAPI
     from .books import BookAPI
     from .series import SeriesAPI
     from .students import StudentAPI
@@ -43,6 +44,7 @@ class AusleiheClient:
         self._students_api: Optional[StudentAPI] = None
         self._series_api: Optional[SeriesAPI] = None
         self._users_api: Optional[UserAPI] = None
+        self._admin_api: Optional[AdminAPI] = None
 
         # Cache for /books (18k objects, expensive to re-fetch)
         self._books_cache: Optional[tuple[list, float]] = None
@@ -181,6 +183,13 @@ class AusleiheClient:
             from .users import UserAPI
             self._users_api = UserAPI(self)
         return self._users_api
+
+    @property
+    def admin(self) -> AdminAPI:
+        if self._admin_api is None:
+            from .admin import AdminAPI
+            self._admin_api = AdminAPI(self)
+        return self._admin_api
 
     # ------------------------------------------------------------------
     # Convenience

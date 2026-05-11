@@ -25,6 +25,10 @@ class StudentAPI:
         raw = self._client.get(f"/students/{student_id}/books")
         return [Book.from_dict(d) for d in raw]
 
+    def get_claims(self, student_id: int) -> list[dict]:
+        """Forderungen eines Schülers. Erfordert mod_sbl_grant_always_enrollments oder Admin."""
+        return self._client.get(f"/students/{student_id}/claims")
+
     def search_by_name(self, lastname: str = "", firstname: str = "") -> list[Student]:
         if not lastname and not firstname:
             return self.get_all()
