@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-import re
 import time
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import quote
 
@@ -53,21 +53,38 @@ class AusleiheClient:
     # Auth
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_form_inputs(html: str) -> dict[str, str]:
+        """Parst alle <input>-Felder aus einem HTML-Formular."""
+        class _Parser(HTMLParser):
+            def __init__(self) -> None:
+                super().__init__()
+                self.inputs: dict[str, str] = {}
+
+            def handle_starttag(self, tag: str, attrs: list) -> None:
+                if tag.lower() == "input":
+                    d = dict(attrs)
+                    name = d.get("name", "")
+                    value = d.get("value", "")
+                    if name:
+                        self.inputs[name] = value
+
+        p = _Parser()
+        p.feed(html)
+        return p.inputs
+
     def _login(self) -> None:
         resp = self._session.get(f"{self._iserv_base}/iserv/login", allow_redirects=True)
         resp.raise_for_status()
 
-        # Attribute order within <input> tags varies — match both orderings
-        match = (
-            re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
-            or re.search(r'<input[^>]+value="([^"]+)"[^>]+name="_token"', resp.text)
-        )
-        if not match:
+        inputs = self._extract_form_inputs(resp.text)
+        csrf_token = inputs.get("_token")
+        if not csrf_token:
+            found = list(inputs.keys())
             raise AuthError(
-                f"CSRF-Token nicht gefunden (finale URL: {resp.url}). "
-                "Login-Seite hat unerwartetes Format."
+                f"CSRF-Token nicht gefunden (URL: {resp.url}, "
+                f"gefundene Felder: {found})"
             )
-        csrf_token = match.group(1)
 
         # resp.url is already the login form URL with ?_target_path=... in the query string
         post_resp = self._session.post(
