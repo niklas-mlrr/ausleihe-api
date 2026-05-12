@@ -26,7 +26,13 @@ print(f"Code:      {b.code}")
 print(f"Titel:     {title}")
 print(f"ISBN:      {b.isbn}")
 print(f"Verlag:    {publisher}")
-print(f"Status:    {'verfügbar' if b.available else 'ausgeliehen'}")
+if b.deleted:
+    status = "gelöscht"
+elif b.available:
+    status = "verfügbar"
+else:
+    status = "ausgeliehen"
+print(f"Status:    {status}")
 print(f"Gelöscht:  {b.deleted}")
 print(f"Inventar:  {b.inventory}")
 print(f"Ausleihen: {b.issuances} gesamt, {b.long_issuances} Langzeit")
