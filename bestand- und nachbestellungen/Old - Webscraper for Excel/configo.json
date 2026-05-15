@@ -1,0 +1,21 @@
+{
+  "excelFilePath": "Dateipfad/zur/Excel/Datei/Mappe1.xlsx",
+  "excelSheetName": "Tabelle1",
+
+  "loginUrl": "https://iserv-trg-oha.de/iserv/login",
+  
+  "entries": [
+    {
+      "url": "https://iserv-trg-oha.de/iserv/ausleihe/myprofile",
+      "iFrameToSwitchTo": "ausleihe-frame",
+      "elementToRead": "//*[@id=\"sbl-app\"]/div/ui-view/div/div[2]/div[2]/div/div[2]/div[2]/div[2]/div/ul/li/div/div[2]/div/strong",
+      "excelCell": "B5"
+    },
+    {
+      "url": "https://iserv-trg-oha.de/iserv/ausleihe/myprofile",
+      "iFrameToSwitchTo": "ausleihe-frame",
+      "elementToRead": "//*[@id=\"sbl-app\"]/div/ui-view/div/div[2]/div[2]/div/div[2]/h3",
+      "excelCell": "C5"
+    }
+  ]
+}
