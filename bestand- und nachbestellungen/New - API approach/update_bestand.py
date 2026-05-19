@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Aktualisiert die 'Bestand'-Zellen in der Excel-Datei mit Daten aus der Ausleihe-API.
+"""Aktualisiert die 'Bestand'- und 'Angemeldet'-Zellen in der Excel-Datei mit Daten aus der Ausleihe-API.
 
 Verwendung:
-    python3 update_bestand.py [--dry-run]
+    python3 update_bestand.py [--dry-run] [--schoolyear 2025/2026]
 
 Liest config.json aus demselben Verzeichnis. Alle Pfade sind relativ zur
 Position dieser Datei – das Skript ist vollständig selbstständig.
-
-'Angemeldet'-Zellen werden noch nicht befüllt (Admin-API-Endpunkt ausstehend).
 """
 from __future__ import annotations
 
@@ -15,7 +13,9 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 _HERE = Path(__file__).parent
 _ROOT = _HERE.parent.parent
@@ -35,9 +35,50 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def pick_schoolyear(client: AusleiheClient, override: str | None) -> str:
+    """Wählt das Schuljahr: explizit per --schoolyear oder das aktuelle (heute zwischen begin/end, sonst neuestes nicht-archiviertes)."""
+    years = client.admin.get_schoolyears()
+    if override:
+        ids = [y["id"] for y in years]
+        if override not in ids:
+            raise SystemExit(f"Schuljahr {override!r} nicht gefunden. Verfügbar: {ids}")
+        return override
+    now = datetime.now(timezone.utc)
+    for y in years:
+        if y.get("archived_at"):
+            continue
+        begin = datetime.fromisoformat(y["begin"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(y["end"].replace("Z", "+00:00"))
+        if begin <= now <= end:
+            return y["id"]
+    candidates = [y for y in years if not y.get("archived_at")]
+    if not candidates:
+        raise SystemExit("Kein passendes Schuljahr gefunden.")
+    return candidates[-1]["id"]
+
+
+def fetch_enrollment_counts(client: AusleiheClient, schoolyear_id: str) -> dict[str, int]:
+    """Zählt aktive Anmeldungen pro ISBN für das angegebene Schuljahr."""
+    path = f"/schoolyears/{quote(schoolyear_id, safe='')}/enrollments/"
+    enrollments = client.get(path)
+    counts: dict[str, int] = {}
+    for enr in enrollments:
+        if enr.get("deleted_at"):
+            continue
+        isbns_in_enrollment = {
+            item["series"]
+            for item in enr.get("booklistItems", [])
+            if item.get("series")
+        }
+        for isbn in isbns_in_enrollment:
+            counts[isbn] = counts.get(isbn, 0) + 1
+    return counts
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bestand-Zellen in Excel aktualisieren")
+    parser = argparse.ArgumentParser(description="Bestand- und Angemeldet-Zellen in Excel aktualisieren")
     parser.add_argument("--dry-run", action="store_true", help="Keine Änderungen speichern")
+    parser.add_argument("--schoolyear", help="Schuljahr-ID, z.B. 2025/2026 (Default: aktuelles)")
     args = parser.parse_args()
 
     config = load_config()
@@ -108,9 +149,49 @@ def main() -> None:
             print(f"  {s}")
 
     if angemeldet_mappings:
-        cells = ", ".join(cell for _, cell in angemeldet_mappings)
-        print(f"\nHINWEIS: {len(angemeldet_mappings)} 'Angemeldet'-Zellen nicht aktualisiert ({cells}).")
-        print("  Benötigt Admin-API (get_enrollments) — noch nicht implementiert.")
+        schoolyear_id = pick_schoolyear(client, args.schoolyear)
+        print(f"\nLade Anmeldungen für Schuljahr {schoolyear_id}...")
+        try:
+            enrollment_counts = fetch_enrollment_counts(client, schoolyear_id)
+        except Exception as e:
+            print(f"FEHLER beim Laden der Anmeldungen: {e}")
+            enrollment_counts = None
+
+        if enrollment_counts is not None:
+            a_changed: list[tuple[str, object, int]] = []
+            a_unchanged = 0
+            a_zero: list[str] = []
+            for isbn, cell in angemeldet_mappings:
+                new = enrollment_counts.get(isbn, 0)
+                old = ws[cell].value
+                try:
+                    same = old is not None and int(old) == new
+                except (TypeError, ValueError):
+                    same = False
+                if not same:
+                    ws[cell] = new
+                    a_changed.append((cell, old, new))
+                else:
+                    a_unchanged += 1
+                if new == 0:
+                    a_zero.append(f"{cell} (ISBN {isbn})")
+
+            if a_changed:
+                if not args.dry_run:
+                    wb.save(str(excel_path))
+                print(f"{len(a_changed)} 'Angemeldet'-Zelle(n) {'würden aktualisiert' if args.dry_run else 'aktualisiert'}:")
+                for cell, old, new in a_changed:
+                    print(f"  {cell}: {old} -> {new}")
+            else:
+                print("Keine Änderungen bei 'Angemeldet'-Zellen.")
+
+            if a_unchanged:
+                print(f"{a_unchanged} 'Angemeldet'-Zelle(n) bereits aktuell.")
+
+            if a_zero:
+                print(f"\n{len(a_zero)} 'Angemeldet'-Zelle(n) mit 0 Anmeldungen (keine Treffer im Schuljahr):")
+                for s in a_zero:
+                    print(f"  {s}")
 
 
 if __name__ == "__main__":
