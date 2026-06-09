@@ -7,8 +7,8 @@ Schuljahre und matcht über firstname + lastname + date_of_birth.
 Es werden ausschliesslich GET-Requests gemacht; KEINE Daten werden geaendert.
 
 Verwendung:
-  PYTHONPATH=. python3 examples/students/enrollments_by_id.py <student_id>
-  PYTHONPATH=. python3 examples/students/enrollments_by_id.py 2167
+  python3 examples/students/enrollments_by_id.py <student_id>
+  python3 examples/students/enrollments_by_id.py 2167
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die

@@ -2,9 +2,12 @@
 Zahlungstransaktionen abrufen. [Admin]
 
 Verwendung:
-  python3 examples/admin_only/transactions.py
-  python3 examples/admin_only/transactions.py csv
-  python3 examples/admin_only/transactions.py xlsx
+  python3 examples/admin_only/transactions.py        # JSON (erste 10)
+  python3 examples/admin_only/transactions.py csv     # Export als CSV
+  python3 examples/admin_only/transactions.py xlsx    # Export als Excel
+
+Ohne Argument werden die Transaktionen als JSON gelistet; mit "csv" oder "xlsx"
+liefert die API den jeweiligen Datei-Export.
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die

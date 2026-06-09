@@ -2,9 +2,11 @@
 Leihschein als PDF herunterladen.
 
 Verwendung:
-  python3 examples/misc/loan_slip_pdf.py <student_id>
-  python3 examples/misc/loan_slip_pdf.py <student_id> <ausgabe.pdf>
+  python3 examples/misc/loan_slip_pdf.py <student_id> [ausgabe.pdf]
+  python3 examples/misc/loan_slip_pdf.py 2167
   python3 examples/misc/loan_slip_pdf.py 2167 leihschein.pdf
+
+Ohne Dateiname wird "leihschein_<student_id>.pdf" verwendet.
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, die

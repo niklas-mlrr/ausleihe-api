@@ -4,7 +4,7 @@ READ-ONLY: Anmeldungen (enrollments) für das kommende Schuljahr abrufen.
 Macht ausschliesslich GET-Requests. Es werden KEINE Daten geaendert/angelegt.
 
 Verwendung:
-  PYTHONPATH=. python3 examples/schoolyears/next_year_enrollments.py
+  python3 examples/schoolyears/next_year_enrollments.py
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError

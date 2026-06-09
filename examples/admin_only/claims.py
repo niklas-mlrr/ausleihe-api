@@ -2,8 +2,12 @@
 Alle Forderungen abrufen, oder Mahnbriefe als PDF. [Admin]
 
 Verwendung:
+  # Forderungen auflisten (erste 10):
   python3 examples/admin_only/claims.py
+
+  # Mahnbriefe als PDF speichern (Dateiname optional, Standard: mahnbriefe.pdf):
   python3 examples/admin_only/claims.py pdf [ausgabe.pdf]
+  python3 examples/admin_only/claims.py pdf mahnbriefe.pdf
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die

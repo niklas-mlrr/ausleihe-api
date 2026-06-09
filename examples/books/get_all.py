@@ -3,7 +3,7 @@ Alle Bücher abrufen.
 
 Verwendung:
   python3 examples/books/get_all.py
-  python3 examples/books/get_all.py --deleted
+  python3 examples/books/get_all.py --deleted   # gelöschte Bücher einschließen
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client

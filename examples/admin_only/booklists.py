@@ -2,9 +2,15 @@
 Bücherlisten eines Schuljahrs abrufen, optional als PDF. [Admin]
 
 Verwendung:
+  # Alle Bücherlisten eines Schuljahrs auflisten:
   python3 examples/admin_only/booklists.py <schoolyear_id>
-  python3 examples/admin_only/booklists.py <schoolyear_id> <booklist_id> [ausgabe.pdf]
   python3 examples/admin_only/booklists.py "2025/2026"
+
+  # Eine einzelne Bücherliste als PDF speichern (Dateiname optional):
+  python3 examples/admin_only/booklists.py <schoolyear_id> <booklist_id> [ausgabe.pdf]
+  python3 examples/admin_only/booklists.py "2025/2026" 42 buecherliste.pdf
+
+schoolyear_id: Schuljahr im Format "YYYY/YYYY" (z.B. "2025/2026").
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die

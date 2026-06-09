@@ -2,10 +2,19 @@
 Anmeldungen eines Schuljahrs abrufen, oder als PDF exportieren. [Admin]
 
 Verwendung:
+  # Anmeldungen eines Schuljahrs auflisten:
   python3 examples/admin_only/enrollments.py <schoolyear_id>
-  python3 examples/admin_only/enrollments.py <schoolyear_id> exemptions [ausgabe.pdf]
-  python3 examples/admin_only/enrollments.py <schoolyear_id> forms      [ausgabe.pdf]
   python3 examples/admin_only/enrollments.py "2025/2026"
+
+  # Befreiungen als PDF exportieren (Dateiname optional):
+  python3 examples/admin_only/enrollments.py <schoolyear_id> exemptions [ausgabe.pdf]
+  python3 examples/admin_only/enrollments.py "2025/2026" exemptions
+
+  # Klassenlisten als PDF exportieren (Dateiname optional):
+  python3 examples/admin_only/enrollments.py <schoolyear_id> forms [ausgabe.pdf]
+  python3 examples/admin_only/enrollments.py "2025/2026" forms
+
+schoolyear_id: Schuljahr im Format "YYYY/YYYY" (z.B. "2025/2026").
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die

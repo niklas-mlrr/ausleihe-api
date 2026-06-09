@@ -2,8 +2,15 @@
 Bücher clientseitig filtern.
 
 Verwendung:
+  # Nach ISBN filtern:
   python3 examples/books/filter.py isbn <isbn>
+  python3 examples/books/filter.py isbn 9783507887435
+
+  # Nach Schüler-ID filtern:
   python3 examples/books/filter.py student <id>
+  python3 examples/books/filter.py student 2167
+
+  # Nur verfügbare bzw. nur ausgeliehene Bücher:
   python3 examples/books/filter.py available
   python3 examples/books/filter.py distributed
 """

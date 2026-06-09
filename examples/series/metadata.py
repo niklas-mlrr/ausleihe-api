@@ -2,9 +2,9 @@
 Metadaten zu Buchserien abrufen: Verlage, Fächer, Jahrgangsstufen.
 
 Verwendung:
-  python3 examples/series/metadata.py publishers
-  python3 examples/series/metadata.py subjects
-  python3 examples/series/metadata.py grades
+  python3 examples/series/metadata.py publishers   # alle Verlage
+  python3 examples/series/metadata.py subjects      # alle Unterrichtsfächer
+  python3 examples/series/metadata.py grades        # Jahrgangsstufen + Serienzahl
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, die
