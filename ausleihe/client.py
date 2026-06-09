@@ -6,6 +6,8 @@ from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import quote
 
+import re
+
 import requests
 
 from .exceptions import AusleiheError, AuthError, ForbiddenError, NotFoundError
@@ -94,7 +96,17 @@ class AusleiheClient:
             allow_redirects=True,
         )
 
-        if "authentication/redirect" not in post_resp.url and post_resp.status_code not in (200, 302):
+        # IServ uses a <meta http-equiv="refresh"> redirect instead of HTTP 3xx
+        # after the OIDC auth step — requests won't follow it automatically.
+        # Note: post_resp.url may contain "authentication/redirect" as a URL-encoded
+        # query param value (redirect_uri), so we can't use URL matching here.
+        match = re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\']0;url=([^"\']+)["\']', post_resp.text, re.IGNORECASE)
+        if match:
+            redirect_url = match.group(1).replace("&amp;", "&")
+            self._session.get(redirect_url, allow_redirects=True)
+
+        # After the OIDC flow completes, IServSession must be set.
+        if "IServSession" not in self._session.cookies:
             raise AuthError(f"Login fehlgeschlagen (Status {post_resp.status_code}). Zugangsdaten prüfen.")
 
         self._fetch_jwt()
