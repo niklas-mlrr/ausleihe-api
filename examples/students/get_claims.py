@@ -8,6 +8,7 @@ Verwendung:
 """
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from _common import make_client, ForbiddenError, die
+import json
 
 if len(sys.argv) < 2:
     die("Verwendung: get_claims.py <id>")
@@ -23,6 +24,6 @@ except ForbiddenError:
 if not claims:
     print(f"Keine Forderungen für Schüler {student_id}.")
 else:
+    # Claim ist ein rohes dict (kein Dataclass-Modell) — siehe schemas.md.
     print(f"{len(claims)} Forderung(en) für Schüler {student_id}:")
-    for c in claims:
-        print(f"  {c}")
+    print(json.dumps(claims, indent=2, ensure_ascii=False))

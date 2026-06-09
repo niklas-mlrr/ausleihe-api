@@ -136,7 +136,19 @@ class AusleiheClient:
     # HTTP
     # ------------------------------------------------------------------
 
-    def _request(self, method: str, path: str, _retry: bool = True, **kwargs: Any) -> Any:
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        auth: str = "header",
+        _retry: bool = True,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """Zentraler HTTP-Pfad: Write-Guard, Token, 401-Retry und Status→Exception-
+        Mapping. ``auth="header"`` setzt ``Authorization: Bearer``,
+        ``auth="query"`` hängt ``?token=<jwt>`` an (für Binär-/PDF-Endpunkte).
+        Gibt die rohe Response zurück; Aufrufer entscheiden ``.json()`` vs ``.content``."""
         if method.upper() != "GET" and not self._allow_writes:
             raise AusleiheError(
                 "Schreibende Requests (PUT/POST/DELETE) sind deaktiviert. Diese API "
@@ -145,15 +157,22 @@ class AusleiheClient:
             )
         self._ensure_token()
         url = self._api_base + path.lstrip("/")
-        headers = kwargs.pop("headers", {})
-        headers["Authorization"] = f"Bearer {self._jwt}"
 
-        resp = self._session.request(method, url, headers=headers, **kwargs)
+        if auth == "query":
+            # PDF-/Binär-Endpunkte erwarten das JWT als Query-Parameter.
+            params = {k: v for k, v in (kwargs.pop("params", None) or {}).items() if k != "token"}
+            kwargs["params"] = {"token": self._jwt, **params}
+        else:
+            headers = {k: v for k, v in (kwargs.pop("headers", None) or {}).items()}
+            headers["Authorization"] = f"Bearer {self._jwt}"
+            kwargs["headers"] = headers
+
+        resp = self._session.request(method, url, **kwargs)
 
         if resp.status_code == 401:
             if _retry:
                 self._fetch_jwt()
-                return self._request(method, path, _retry=False, **kwargs)
+                return self._send(method, path, auth=auth, _retry=False, **kwargs)
             raise AuthError("Authentifizierung fehlgeschlagen (401).")
 
         if resp.status_code == 403:
@@ -169,27 +188,28 @@ class AusleiheClient:
                 msg = resp.text
             raise AusleiheError(f"API-Fehler {resp.status_code}: {msg}")
 
-        return resp.json()
+        return resp
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        return self._send(method, path, **kwargs).json()
 
     def get(self, path: str, **kwargs: Any) -> Any:
         return self._request("GET", path, **kwargs)
 
     def post(self, path: str, **kwargs: Any) -> Any:
+        """Low-Level POST. Write-geschützt: nur mit ``allow_writes=True``. Aktuell
+        nutzt die Library keinen POST-Wrapper — bewusster Escape-Hatch."""
         return self._request("POST", path, **kwargs)
 
     def put(self, path: str, **kwargs: Any) -> Any:
+        """Low-Level PUT. Write-geschützt: nur mit ``allow_writes=True``."""
         return self._request("PUT", path, **kwargs)
 
     def _get_binary(self, path: str, **params: Any) -> bytes:
         """GET eines Binär-/PDF-Endpunkts. Diese nutzen ?token=<jwt> als
-        Query-Parameter statt Authorization-Header."""
-        self._ensure_token()
-        resp = self._session.get(
-            self._api_base + path.lstrip("/"),
-            params={"token": self._jwt, **params},
-        )
-        resp.raise_for_status()
-        return resp.content
+        Query-Parameter statt Authorization-Header. Teilt sich 401-Retry und
+        Status→Exception-Mapping mit allen anderen Requests."""
+        return self._send("GET", path, auth="query", params=params).content
 
     # ------------------------------------------------------------------
     # Sub-APIs (lazy init)

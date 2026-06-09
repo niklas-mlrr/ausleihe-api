@@ -112,6 +112,7 @@ def main() -> None:
     changed: list[tuple[str, object, int, str]] = []
     unchanged: int = 0
     not_found: list[str] = []
+    a_changed: list[tuple[str, object, int]] = []  # vorinitialisiert für den finalen Save-Check
 
     for isbn, cell in bestand_mappings:
         if isbn not in series_total:
@@ -130,8 +131,6 @@ def main() -> None:
         print("-- DRY RUN: keine Datei wird gespeichert --")
 
     if changed:
-        if not args.dry_run:
-            wb.save(str(excel_path))
         print(f"{len(changed)} Zelle(n) {'würden aktualisiert' if args.dry_run else 'aktualisiert'}:")
         for cell, old, new, title in changed:
             print(f"  {cell}: {old} -> {new}  [{title}]")
@@ -175,8 +174,6 @@ def main() -> None:
                     a_zero.append(f"{cell} (ISBN {isbn})")
 
             if a_changed:
-                if not args.dry_run:
-                    wb.save(str(excel_path))
                 print(f"{len(a_changed)} 'Angemeldet'-Zelle(n) {'würden aktualisiert' if args.dry_run else 'aktualisiert'}:")
                 for cell, old, new in a_changed:
                     print(f"  {cell}: {old} -> {new}")
@@ -190,6 +187,11 @@ def main() -> None:
                 print(f"\n{len(a_zero)} 'Angemeldet'-Zelle(n) mit 0 Anmeldungen (keine Treffer im Schuljahr):")
                 for s in a_zero:
                     print(f"  {s}")
+
+    # Einmal speichern, nachdem alle Zellen (Bestand + Angemeldet) gesetzt wurden.
+    if changed or a_changed:
+        if not args.dry_run:
+            wb.save(str(excel_path))
 
 
 if __name__ == "__main__":

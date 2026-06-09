@@ -7,6 +7,13 @@ if TYPE_CHECKING:
 
 
 class UserAPI:
+    """IServ-Nutzer (Lehrer + Schüler + Verwalter).
+
+    Hinweis: Gibt bewusst rohe ``dict``s zurück (kein ``User``-Dataclass-Modell),
+    anders als ``StudentAPI``, das ``Student``-Objekte liefert. Der ``/iserv/users``-
+    Payload ist nicht modelliert; bei Bedarf direkt auf den dict-Feldern arbeiten.
+    """
+
     def __init__(self, client: AusleiheClient) -> None:
         self._client = client
 
