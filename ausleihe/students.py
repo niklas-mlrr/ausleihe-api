@@ -29,6 +29,10 @@ class StudentAPI:
         """Forderungen eines Schülers. Erfordert mod_sbl_grant_always_enrollments oder Admin."""
         return self._client.get(f"/students/{student_id}/claims")
 
+    def get_me(self) -> dict:
+        """Eigenes Schüler-Profil inkl. books[], forms[], claims[], enrollments[]."""
+        return self._client.get("/me")
+
     def search_by_name(self, lastname: str = "", firstname: str = "") -> list[Student]:
         if not lastname and not firstname:
             return self.get_all()

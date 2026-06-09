@@ -14,6 +14,8 @@ __all__ = [
     "ForbiddenError",
     # Sub-APIs (als Type-Hints nutzbar)
     "AdminAPI",
+    "SchoolyearsAPI",
 ]
 
 from .admin import AdminAPI  # noqa: E402
+from .schoolyears import SchoolyearsAPI  # noqa: E402

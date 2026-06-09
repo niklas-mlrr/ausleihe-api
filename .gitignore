@@ -6,3 +6,6 @@ build/
 .env
 .venv/
 .DS_Store
+
+# Datenexporte (enthalten Schüler-/Personendaten) – nie committen
+*.pdf

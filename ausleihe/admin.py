@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import quote
 
 from .models import Book
 
@@ -21,13 +22,13 @@ class AdminAPI:
     def get_schoolyears(self) -> list[dict]:
         return self._client.get("/schoolyears")
 
-    def get_booklists(self, schoolyear_id: int) -> list[dict]:
-        return self._client.get(f"/schoolyears/{schoolyear_id}/booklists/")
+    def get_booklists(self, schoolyear_id: str) -> list[dict]:
+        return self._client.get(f"/schoolyears/{quote(schoolyear_id, safe='')}/booklists/")
 
-    def get_booklist_pdf(self, schoolyear_id: int, booklist_id: int) -> bytes:
+    def get_booklist_pdf(self, schoolyear_id: str, booklist_id: int) -> bytes:
         self._client._ensure_token()
         resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{schoolyear_id}/booklists/{booklist_id}/pdf",
+            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/booklists/{booklist_id}/pdf",
             params={"token": self._client._jwt},
         )
         resp.raise_for_status()
@@ -37,22 +38,22 @@ class AdminAPI:
     # Anmeldungen
     # ------------------------------------------------------------------
 
-    def get_enrollments(self, schoolyear_id: int) -> list[dict]:
-        return self._client.get(f"/schoolyears/{schoolyear_id}/enrollments/")
+    def get_enrollments(self, schoolyear_id: str) -> list[dict]:
+        return self._client.get(f"/schoolyears/{quote(schoolyear_id, safe='')}/enrollments/")
 
-    def get_enrollments_export_pdf(self, schoolyear_id: int) -> bytes:
+    def get_enrollments_export_pdf(self, schoolyear_id: str) -> bytes:
         self._client._ensure_token()
         resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{schoolyear_id}/enrollments/export/exemptions-remissions",
+            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/enrollments/export/exemptions-remissions",
             params={"token": self._client._jwt},
         )
         resp.raise_for_status()
         return resp.content
 
-    def get_form_students_pdf(self, schoolyear_id: int) -> bytes:
+    def get_form_students_pdf(self, schoolyear_id: str) -> bytes:
         self._client._ensure_token()
         resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{schoolyear_id}/forms/export/form-students",
+            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/forms/export/form-students",
             params={"token": self._client._jwt},
         )
         resp.raise_for_status()
