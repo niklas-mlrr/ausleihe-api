@@ -11,6 +11,12 @@ setup(
         "requests>=2.31.0",
         "python-dotenv>=1.0.0",
     ],
+    extras_require={
+        # Excel-Bestands-/Nachbestellungs-Tooling
+        "bestand": ["openpyxl>=3.1.0"],
+        # Entwicklung / Tests
+        "dev": ["pytest>=7.0"],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

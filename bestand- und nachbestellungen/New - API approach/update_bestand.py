@@ -15,7 +15,6 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 _HERE = Path(__file__).parent
 _ROOT = _HERE.parent.parent
@@ -59,8 +58,7 @@ def pick_schoolyear(client: AusleiheClient, override: str | None) -> str:
 
 def fetch_enrollment_counts(client: AusleiheClient, schoolyear_id: str) -> dict[str, int]:
     """Zählt aktive Anmeldungen pro ISBN für das angegebene Schuljahr."""
-    path = f"/schoolyears/{quote(schoolyear_id, safe='')}/enrollments/"
-    enrollments = client.get(path)
+    enrollments = client.admin.get_enrollments(schoolyear_id)
     counts: dict[str, int] = {}
     for enr in enrollments:
         if enr.get("deleted_at"):

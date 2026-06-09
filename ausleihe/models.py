@@ -24,6 +24,8 @@ class Student:
     anonymized_at: Optional[datetime]
     import_id: Optional[str]
     created_at: Optional[datetime]
+    import_profile: Optional[int] = None
+    created_by: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: dict) -> Student:
@@ -37,6 +39,8 @@ class Student:
             anonymized_at=_parse_dt(d.get("anonymized_at")),
             import_id=d.get("import_id"),
             created_at=_parse_dt(d.get("created_at")),
+            import_profile=d.get("import_profile"),
+            created_by=d.get("created_by"),
         )
 
     def __str__(self) -> str:
@@ -55,6 +59,15 @@ class Series:
     subjects: list[str]
     total: Optional[int] = None
     available: Optional[int] = None
+    # API liefert zusätzlich flache Arrays und Meta-Felder
+    grades_flat: list[int] = field(default_factory=list)
+    subjects_flat: list[str] = field(default_factory=list)
+    is_multi_year: bool = False
+    last_change: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    abolished_at: Optional[datetime] = None  # nur in der /series-Liste
+    abolished_by: Optional[str] = None       # nur in der /series-Liste
 
     @classmethod
     def from_dict(cls, d: dict) -> Series:
@@ -74,6 +87,14 @@ class Series:
             subjects=subjects,
             total=d.get("total"),
             available=d.get("available"),
+            grades_flat=list(d.get("gradesFlat") or []),
+            subjects_flat=list(d.get("subjectsFlat") or []),
+            is_multi_year=bool(d.get("isMultiYear", False)),
+            last_change=_parse_dt(d.get("last_change")),
+            created_by=d.get("created_by"),
+            created_at=_parse_dt(d.get("created_at")),
+            abolished_at=_parse_dt(d.get("abolished_at")),
+            abolished_by=d.get("abolished_by"),
         )
 
     def __str__(self) -> str:

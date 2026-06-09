@@ -15,8 +15,9 @@ from ausleihe import AusleiheClient
 from ausleihe import AusleiheError, AuthError, ForbiddenError, NotFoundError
 
 
-def make_client() -> AusleiheClient:
-    return AusleiheClient()
+def make_client(allow_writes: bool = False) -> AusleiheClient:
+    # Standardmäßig read-only — diese API zeigt auf die Produktion.
+    return AusleiheClient(allow_writes=allow_writes)
 
 
 def die(msg: str) -> None:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
-from urllib.parse import quote
 
+from ._util import encode_schoolyear
 from .models import Book
 
 if TYPE_CHECKING:
@@ -23,41 +23,28 @@ class AdminAPI:
         return self._client.get("/schoolyears")
 
     def get_booklists(self, schoolyear_id: str) -> list[dict]:
-        return self._client.get(f"/schoolyears/{quote(schoolyear_id, safe='')}/booklists/")
+        # Identischer GET-Endpunkt wie client.schoolyears.get_booklists — dort liegt
+        # die Implementierung, hier nur als Convenience im Admin-Namespace.
+        return self._client.schoolyears.get_booklists(schoolyear_id)
 
     def get_booklist_pdf(self, schoolyear_id: str, booklist_id: int) -> bytes:
-        self._client._ensure_token()
-        resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/booklists/{booklist_id}/pdf",
-            params={"token": self._client._jwt},
-        )
-        resp.raise_for_status()
-        return resp.content
+        sy = encode_schoolyear(schoolyear_id)
+        return self._client._get_binary(f"schoolyears/{sy}/booklists/{booklist_id}/pdf")
 
     # ------------------------------------------------------------------
     # Anmeldungen
     # ------------------------------------------------------------------
 
     def get_enrollments(self, schoolyear_id: str) -> list[dict]:
-        return self._client.get(f"/schoolyears/{quote(schoolyear_id, safe='')}/enrollments/")
+        return self._client.get(f"/schoolyears/{encode_schoolyear(schoolyear_id)}/enrollments/")
 
     def get_enrollments_export_pdf(self, schoolyear_id: str) -> bytes:
-        self._client._ensure_token()
-        resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/enrollments/export/exemptions-remissions",
-            params={"token": self._client._jwt},
-        )
-        resp.raise_for_status()
-        return resp.content
+        sy = encode_schoolyear(schoolyear_id)
+        return self._client._get_binary(f"schoolyears/{sy}/enrollments/export/exemptions-remissions")
 
     def get_form_students_pdf(self, schoolyear_id: str) -> bytes:
-        self._client._ensure_token()
-        resp = self._client._session.get(
-            f"{self._client._api_base}schoolyears/{quote(schoolyear_id, safe='')}/forms/export/form-students",
-            params={"token": self._client._jwt},
-        )
-        resp.raise_for_status()
-        return resp.content
+        sy = encode_schoolyear(schoolyear_id)
+        return self._client._get_binary(f"schoolyears/{sy}/forms/export/form-students")
 
     # ------------------------------------------------------------------
     # Systemeinstellungen
@@ -75,13 +62,7 @@ class AdminAPI:
 
     def get_claim_letters_pdf(self, **params: Any) -> bytes:
         """PDF mit Mahnbriefen. Zusätzliche Query-Parameter per kwargs übergeben."""
-        self._client._ensure_token()
-        resp = self._client._session.get(
-            f"{self._client._api_base}claim_letters/pdf/",
-            params={"token": self._client._jwt, **params},
-        )
-        resp.raise_for_status()
-        return resp.content
+        return self._client._get_binary("claim_letters/pdf/", **params)
 
     # ------------------------------------------------------------------
     # Schüler-ID-Barcodes
@@ -91,7 +72,9 @@ class AdminAPI:
         return self._client.get(f"/studentids/{code}")
 
     def set_student_id(self, code: str, student_id: int) -> dict:
-        return self._client.post(f"/studentids/{code}", json={"student": student_id})
+        # SCHREIBEND — wirkt auf die Produktion. Nur mit AusleiheClient(allow_writes=True).
+        # Das Frontend nutzt hierfür PUT /studentids/:code (aus dem $resource-Bundle).
+        return self._client.put(f"/studentids/{code}", json={"student": student_id})
 
     # ------------------------------------------------------------------
     # Finanzen

@@ -13,11 +13,9 @@ rules = client.get_borrowing_rules()
 
 print(f"{len(rules)} Ausleihregeln:\n")
 for r in rules:
-    created = ""
-    if r.get("created_at"):
-        created = f"  (erstellt: {r['created_at'][:10]})"
+    created = f"  (erstellt: {r.created_at.date()})" if r.created_at else ""
     # HTML-Tags aus dem Text entfernen für lesbare Ausgabe
-    text = re.sub(r"<[^>]+>", "", r.get("text", "")).strip()
-    print(f"--- Regel {r.get('id')} ---{created}")
+    text = re.sub(r"<[^>]+>", "", r.text).strip()
+    print(f"--- Regel {r.id} ---{created}")
     print(text[:300])
     print()

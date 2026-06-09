@@ -4,13 +4,13 @@ import os
 import time
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, Optional
-from urllib.parse import quote
 
 import re
 
 import requests
 
 from .exceptions import AusleiheError, AuthError, ForbiddenError, NotFoundError
+from .models import BorrowingRule
 
 if TYPE_CHECKING:
     from .admin import AdminAPI
@@ -27,10 +27,15 @@ class AusleiheClient:
         domain: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        allow_writes: bool = False,
     ) -> None:
         self._domain = domain or os.environ["ISERV_DOMAIN"]
         self._username = username or os.environ["ISERV_USERNAME"]
         self._password = password or os.environ["ISERV_PASSWORD"]
+
+        # Diese API zeigt auf die PRODUKTION der Schule. Schreibende Requests sind
+        # standardmäßig gesperrt; bewusst nur mit allow_writes=True aktivieren.
+        self._allow_writes = allow_writes
 
         self._api_base = f"https://ausleihe-api.{self._domain}/"
         self._iserv_base = f"https://{self._domain}"
@@ -132,6 +137,12 @@ class AusleiheClient:
     # ------------------------------------------------------------------
 
     def _request(self, method: str, path: str, _retry: bool = True, **kwargs: Any) -> Any:
+        if method.upper() != "GET" and not self._allow_writes:
+            raise AusleiheError(
+                "Schreibende Requests (PUT/POST/DELETE) sind deaktiviert. Diese API "
+                "wirkt auf die PRODUKTION — Writes nur mit AusleiheClient(allow_writes=True) "
+                "und nur, wenn ausdrücklich autorisiert."
+            )
         self._ensure_token()
         url = self._api_base + path.lstrip("/")
         headers = kwargs.pop("headers", {})
@@ -165,6 +176,20 @@ class AusleiheClient:
 
     def post(self, path: str, **kwargs: Any) -> Any:
         return self._request("POST", path, **kwargs)
+
+    def put(self, path: str, **kwargs: Any) -> Any:
+        return self._request("PUT", path, **kwargs)
+
+    def _get_binary(self, path: str, **params: Any) -> bytes:
+        """GET eines Binär-/PDF-Endpunkts. Diese nutzen ?token=<jwt> als
+        Query-Parameter statt Authorization-Header."""
+        self._ensure_token()
+        resp = self._session.get(
+            self._api_base + path.lstrip("/"),
+            params={"token": self._jwt, **params},
+        )
+        resp.raise_for_status()
+        return resp.content
 
     # ------------------------------------------------------------------
     # Sub-APIs (lazy init)
@@ -216,11 +241,11 @@ class AusleiheClient:
     # Convenience
     # ------------------------------------------------------------------
 
-    def get_borrowing_rules(self) -> list[dict]:
+    def get_borrowing_rules(self) -> list[BorrowingRule]:
         """Öffentlicher Endpunkt, kein Auth nötig."""
         resp = self._session.get(f"{self._api_base}borrowing-rules")
         resp.raise_for_status()
-        return resp.json()
+        return [BorrowingRule.from_dict(d) for d in resp.json()]
 
     def get_loan_slip_pdf(
         self,
@@ -230,16 +255,9 @@ class AusleiheClient:
         doublepage: bool = False,
     ) -> bytes:
         """Leihschein als PDF (gibt rohe Bytes zurück)."""
-        self._ensure_token()
-        params: dict[str, Any] = {
-            "token": self._jwt,
-            "studentId": student_id,
-            "variant": variant,
-        }
+        params: dict[str, Any] = {"studentId": student_id, "variant": variant}
         if start_reporting_period:
             params["startReportingPeriod"] = start_reporting_period
         if doublepage:
             params["doublepage"] = "true"
-        resp = self._session.get(f"{self._api_base}loan-slips", params=params)
-        resp.raise_for_status()
-        return resp.content
+        return self._get_binary("loan-slips", **params)
