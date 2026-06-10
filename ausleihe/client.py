@@ -272,12 +272,18 @@ class AusleiheClient:
         student_id: int,
         variant: str = "student",
         start_reporting_period: Optional[str] = None,
-        doublepage: bool = False,
     ) -> bytes:
-        """Leihschein als PDF (gibt rohe Bytes zurück)."""
+        """Leihschein als PDF (gibt rohe Bytes zurück).
+
+        Die Seitenzahl steuert ``variant``:
+        - ``"student"`` (Default) → 1 Seite (Schüler-Beleg)
+        - ``"student-always_school-auto"`` → 2 Seiten (Schüler- + Schul-Beleg,
+          identisch zum Webseiten-Download; Seite 2 mit abweichendem Signaturfeld)
+
+        (Der früher hier vorhandene ``doublepage``-Parameter wurde vom Server
+        ignoriert und ist entfernt.)
+        """
         params: dict[str, Any] = {"studentId": student_id, "variant": variant}
         if start_reporting_period:
             params["startReportingPeriod"] = start_reporting_period
-        if doublepage:
-            params["doublepage"] = "true"
         return self._get_binary("loan-slips", **params)
