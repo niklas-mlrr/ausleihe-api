@@ -83,9 +83,31 @@ class AdminAPI:
     def get_bank(self) -> dict:
         return self._client.get("/bank")
 
-    def get_transactions(self, format: Optional[str] = None) -> list[dict]:
-        params = {"format": format} if format else {}
-        return self._client.get("/transactions/", params=params)
+    def get_transactions(
+        self,
+        *,
+        dedicated: Optional[bool] = None,
+        ignored: Optional[bool] = None,
+    ) -> list[dict]:
+        """Banktransaktionen via ``GET /bank/transactions/`` (liefert JSON).
+
+        Der echte Endpunkt ist ``bank/transactions/`` — ``/transactions/`` liefert
+        404 (war Fehleintrag). Serverseitige Filter (verifiziert 2026-06-10):
+
+        - ``dedicated=True``  → nur vollständig zugeordnete Transaktionen
+        - ``dedicated=False`` → "Zuordnung offen" (noch nicht zugeordnet)
+        - ``ignored=True``    → ausgeblendete Transaktionen
+
+        Ohne Filter werden alle zurückgegeben. (Ein früherer ``format``-Parameter
+        war wirkungslos — der Server liefert nur JSON, kein CSV/XLSX — und wurde
+        entfernt.)
+        """
+        params: dict[str, str] = {}
+        if dedicated is not None:
+            params["dedicated"] = "true" if dedicated else "false"
+        if ignored is not None:
+            params["ignored"] = "true" if ignored else "false"
+        return self._client.get("/bank/transactions/", params=params)
 
     # ------------------------------------------------------------------
     # Serien-Exemplare
