@@ -12,8 +12,16 @@ class SeriesAPI:
     def __init__(self, client: AusleiheClient) -> None:
         self._client = client
 
-    def get_all(self) -> list[Series]:
-        raw = self._client.get("/series")
+    def get_all(self, detailed: bool = False) -> list[Series]:
+        """Alle Buchserien (Titel-Ebene).
+
+        Mit ``detailed=True`` (``GET /series?detailed=true``) liefert der Server
+        zusätzlich ``total`` (Exemplare gesamt) und ``available`` (verfügbar) je
+        Serie — andernfalls sind diese nur über ``get_by_isbn`` pro Serie verfügbar.
+        Spart 296 Einzelabfragen, wenn man die Bestände aller Serien braucht.
+        """
+        params = {"detailed": "true"} if detailed else {}
+        raw = self._client.get("/series", params=params)
         return [Series.from_dict(d) for d in raw]
 
     def get_by_isbn(self, isbn: str) -> Series:
