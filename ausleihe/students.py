@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._util import name_params
 from .models import Book, Student
 
 if TYPE_CHECKING:
@@ -36,10 +37,5 @@ class StudentAPI:
     def search_by_name(self, lastname: str = "", firstname: str = "") -> list[Student]:
         if not lastname and not firstname:
             return self.get_all()
-        params: dict = {}
-        if lastname:
-            params["lastname"] = lastname
-        if firstname:
-            params["firstname"] = firstname
-        raw = self._client.get("/students/", params=params)
+        raw = self._client.get("/students/", params=name_params(lastname, firstname))
         return [Student.from_dict(d) for d in raw]

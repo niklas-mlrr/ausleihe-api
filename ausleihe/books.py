@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .models import Book
 
@@ -14,18 +14,23 @@ _CACHE_TTL = 300  # seconds
 class BookAPI:
     def __init__(self, client: AusleiheClient) -> None:
         self._client = client
+        # Cache for /books (18k objects, expensive to re-fetch). Lives on the
+        # sub-API instance, which the client holds for its whole lifetime.
+        self._cache: Optional[tuple[list[Book], float]] = None
 
     def get_all(self, include_deleted: bool = False) -> list[Book]:
-        cache = self._client._books_cache
+        cache = self._cache
         if cache and not include_deleted and time.time() - cache[1] < _CACHE_TTL:
-            return cache[0]
+            # Copy so callers can't mutate the cached list out from under us.
+            return list(cache[0])
 
         params = {"deleted": "true"} if include_deleted else {}
         raw = self._client.get("/books", params=params)
         books = [Book.from_dict(d) for d in raw]
 
         if not include_deleted:
-            self._client._books_cache = (books, time.time())
+            self._cache = (books, time.time())
+            return list(books)
 
         return books
 
@@ -46,4 +51,4 @@ class BookAPI:
         return [b for b in self.get_all() if b.distributed and not b.deleted]
 
     def invalidate_cache(self) -> None:
-        self._client._books_cache = None
+        self._cache = None

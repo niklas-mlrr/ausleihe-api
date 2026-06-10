@@ -55,9 +55,6 @@ class AusleiheClient:
         self._admin_api: Optional[AdminAPI] = None
         self._schoolyears_api: Optional[SchoolyearsAPI] = None
 
-        # Cache for /books (18k objects, expensive to re-fetch)
-        self._books_cache: Optional[tuple[list, float]] = None
-
         self._login()
 
     # ------------------------------------------------------------------
@@ -191,7 +188,15 @@ class AusleiheClient:
         return resp
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        return self._send(method, path, **kwargs).json()
+        resp = self._send(method, path, **kwargs)
+        # GET-Endpunkte liefern immer JSON; schreibende Endpunkte (POST/PUT)
+        # antworten teils mit 204/leerem Body oder Nicht-JSON → nicht blind .json().
+        if not resp.content:
+            return None
+        try:
+            return resp.json()
+        except ValueError:
+            return resp.text
 
     def get(self, path: str, **kwargs: Any) -> Any:
         return self._request("GET", path, **kwargs)
@@ -269,11 +274,16 @@ class AusleiheClient:
 
     def get_loan_slip_pdf(
         self,
-        student_id: int,
+        student_id: Optional[int] = None,
         variant: str = "student",
         start_reporting_period: Optional[str] = None,
+        *,
+        form_id: Optional[int] = None,
     ) -> bytes:
         """Leihschein als PDF (gibt rohe Bytes zurück).
+
+        Genau einen von ``student_id`` **oder** ``form_id`` angeben — der Endpunkt
+        akzeptiert ``studentId`` (Einzel-Beleg) oder ``formId`` (Klassen-Beleg).
 
         Die Seitenzahl steuert ``variant``:
         - ``"student"`` (Default) → 1 Seite (Schüler-Beleg)
@@ -283,7 +293,13 @@ class AusleiheClient:
         (Der früher hier vorhandene ``doublepage``-Parameter wurde vom Server
         ignoriert und ist entfernt.)
         """
-        params: dict[str, Any] = {"studentId": student_id, "variant": variant}
+        if (student_id is None) == (form_id is None):
+            raise ValueError("Genau einen von student_id oder form_id angeben.")
+        params: dict[str, Any] = {"variant": variant}
+        if student_id is not None:
+            params["studentId"] = student_id
+        else:
+            params["formId"] = form_id
         if start_reporting_period:
             params["startReportingPeriod"] = start_reporting_period
         return self._get_binary("loan-slips", **params)

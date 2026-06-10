@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._util import name_params
+
 if TYPE_CHECKING:
     from .client import AusleiheClient
 
@@ -23,9 +25,4 @@ class UserAPI:
     def search_by_name(self, lastname: str = "", firstname: str = "") -> list[dict]:
         if not lastname and not firstname:
             return self.get_all()
-        params: dict = {}
-        if lastname:
-            params["lastname"] = lastname
-        if firstname:
-            params["firstname"] = firstname
-        return self._client.get("/iserv/users/", params=params)
+        return self._client.get("/iserv/users/", params=name_params(lastname, firstname))
