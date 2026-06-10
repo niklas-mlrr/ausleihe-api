@@ -94,3 +94,23 @@ class AdminAPI:
     def get_series_books(self, isbn: str) -> list[Book]:
         raw = self._client.get(f"/series/{isbn}/books")
         return [Book.from_dict(d) for d in raw]
+
+    # ------------------------------------------------------------------
+    # Nachbestell-Bedarf (nativer Endpunkt)
+    # ------------------------------------------------------------------
+
+    def get_reorder_demand(self, schoolyear_id: str) -> list[dict]:
+        """Nachbestell-Bedarf pro Serie für ein Schuljahr (read-only).
+
+        Nativer Ersatz für das Excel-Scraping. Jede Serie enthält neben den
+        Series-Feldern (`isbn`, `title`, `publisher`, `total`, `available`, …)
+        Aggregate:
+        - ``stats``: ``{countAllAssigned, countComplete, countNotAssigned}``
+        - ``statsByForm``: ``[{id, name, countAll, countComplete}, …]`` (pro Klasse)
+        - ``statsWithoutForm``: gleiche Struktur, Anmeldungen ohne Klasse
+
+        (Der Basis-GET ``/stock-reorder/:schoolyear`` liefert 404 — nur ``/demand``
+        und ``PUT`` existieren.)
+        """
+        sy = encode_schoolyear(schoolyear_id)
+        return self._client.get(f"/stock-reorder/{sy}/demand")
