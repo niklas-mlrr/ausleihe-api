@@ -205,6 +205,7 @@ def main() -> None:
     parser.add_argument("--schoolyear", help="Schuljahr-ID, z.B. 2025/2026")
     parser.add_argument("--excel", help="Excel-Dateiname (überschreibt config.json)")
     parser.add_argument("--sheet", help="Tabellenblatt-Name (überschreibt config.json)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Detaillierte Debug-Ausgaben")
     args = parser.parse_args()
 
     print(f"Verbinde mit IServ ({os.environ.get('ISERV_DOMAIN', '?')})...")
@@ -230,8 +231,21 @@ def main() -> None:
     print("Lade Anmeldungen...")
     enrolled_counts, paid_counts = fetch_enrollment_counts_by_grade(client, sy_id)
 
+    if args.verbose:
+        print(f"  enrolled_counts: {len(enrolled_counts)} Einträge, paid_counts: {len(paid_counts)} Einträge")
+        sample = list(enrolled_counts.items())[:5]
+        for k, v in sample:
+            print(f"    enrolled {k} = {v}, paid = {paid_counts.get(k, 0)}")
+
     wb = load_workbook(str(excel_path))
     ws = wb[sheet_name]
+
+    if args.verbose:
+        print(f"\nExcel geladen: {ws.max_row} Zeilen, {ws.max_column} Spalten")
+        print("Erste Zeilen (Spalte A):")
+        for r in range(1, min(ws.max_row + 1, 20)):
+            val = ws.cell(r, 1).value
+            print(f"  Zeile {r:3d}: A={val!r}")
 
     fach_rows: list[int] = []      # alle bisher gesehenen Fach-Zeilen (aufsteigend)
     zustand_rows: list[int] = []   # alle bisher gesehenen Zustand-Zeilen (aufsteigend)
@@ -240,7 +254,7 @@ def main() -> None:
     consecutive_other = 0
     changes: list[str] = []
 
-    print("Analysiere Excel-Struktur...\n")
+    print("\nAnalysiere Excel-Struktur...\n")
 
     for row in range(1, ws.max_row + 1):
         row_type = classify_row(ws, row)
@@ -248,15 +262,22 @@ def main() -> None:
         if row_type == "fach":
             fach_rows.append(row)
             consecutive_other = 0
+            if args.verbose:
+                print(f"  Zeile {row}: FACH erkannt")
             continue
 
         if row_type == "zustand":
             zustand_rows.append(row)
             consecutive_other = 0
+            if args.verbose:
+                print(f"  Zeile {row}: ZUSTAND erkannt")
             continue
 
         if row_type == "other":
             consecutive_other += 1
+            if args.verbose:
+                a_val = ws.cell(row, 1).value
+                print(f"  Zeile {row}: other (consecutive={consecutive_other}, A={a_val!r})")
             if consecutive_other > 3:
                 print(f"Zeile {row}: Abbruch – mehr als 3 nicht erkannte Zeilen in Folge.")
                 break
@@ -265,7 +286,11 @@ def main() -> None:
         # Jahrgang-Zeile
         consecutive_other = 0
         grade = extract_grade(ws, row)
+        if args.verbose:
+            print(f"\n  Zeile {row}: JAHRGANG {grade} | fach_rows={fach_rows} | zustand_rows={zustand_rows}")
         if grade is None or not fach_rows:
+            if args.verbose:
+                print(f"    -> Übersprungen (grade={grade}, fach_rows leer={not fach_rows})")
             continue
 
         # Bücher für diesen Jahrgang laden (gecacht)
@@ -279,24 +304,39 @@ def main() -> None:
                 grade_books_cache[grade] = []
         books = grade_books_cache[grade]
 
+        if args.verbose:
+            print(f"    {len(books)} Bücher geladen")
+            for b in books:
+                print(f"      isbn={b['isbn']} subjects={b['subjects']} title={b['title'][:50]!r}")
+
         # Alle Spalten der Jahrgang-Zeile durchsuchen
         for col in range(2, ws.max_column + 1):
+            col_letter = get_column_letter(col)
+
             # Zustand-Label für diese Spalte bestimmen
             zustand_label = find_zustand_for_col(ws, zustand_rows, col)
             if zustand_label is None:
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: kein Zustand-Label → skip")
                 continue
             zustand_norm = zustand_label.strip().lower()
             if zustand_norm not in ("angemeldet", "bezahlt"):
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: Zustand={zustand_label!r} (nicht angemeldet/bezahlt) → skip")
                 continue
 
             # Fach-Label für diese Spalte bestimmen (mit Fallback auf höhere Fach-Zeilen)
             fach_val = find_fach_for_col(ws, fach_rows, col)
             if fach_val is None:
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: [{zustand_label}] kein Fach-Label → skip")
                 continue
 
             subject, hint = strip_hint(fach_val)
             book = match_book(books, subject, hint)
             if book is None:
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: [{zustand_label}] Fach={fach_val!r} → kein Buch-Match (subjects in Bücherliste: {[b['subjects'] for b in books]})")
                 continue
 
             # Ankerzelle der Jahrgang-Zeile bestimmen (Zellenverbund-Auflösung)
@@ -304,7 +344,9 @@ def main() -> None:
             anchor_ref = f"{get_column_letter(ac)}{ar}"
 
             if anchor_ref in processed_anchors:
-                continue  # Mehrjahresband oder bereits bearbeitet
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: {anchor_ref} bereits verarbeitet → skip")
+                continue
             processed_anchors.add(anchor_ref)
 
             isbn = book["isbn"]
@@ -313,6 +355,9 @@ def main() -> None:
                 new_val = enrolled_counts.get(key, 0)
             else:  # bezahlt
                 new_val = paid_counts.get(key, 0)
+
+            if args.verbose:
+                print(f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, paid={paid_counts.get(key,'–')}, new_val={new_val}")
 
             old_val = ws[anchor_ref].value
             ws[anchor_ref] = new_val
