@@ -151,14 +151,14 @@ def load_grade_books(client: AusleiheClient, sy_id: str, bl_id: int) -> list[dic
 
 
 def match_book(books: list[dict], subject: str, hint: str | None) -> dict | None:
-    """Sucht passendes Buch nach Fach; Klammerzusatz schränkt bei Mehrfachtreffern ein."""
+    """Sucht passendes Buch nach Fach; Klammerzusatz muss als ganzes Wort im Titel stehen."""
     candidates = [b for b in books if subject in b["subjects"]]
     if not candidates:
         return None
-    if hint and len(candidates) > 1:
-        narrowed = [b for b in candidates if hint.lower() in b["title"].lower()]
-        if narrowed:
-            return narrowed[0]
+    if hint:
+        pattern = re.compile(r"\b" + re.escape(hint) + r"\b", re.IGNORECASE)
+        narrowed = [b for b in candidates if pattern.search(b["title"])]
+        return narrowed[0] if narrowed else None
     return candidates[0]
 
 
