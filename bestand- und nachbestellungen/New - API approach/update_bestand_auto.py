@@ -410,7 +410,7 @@ def main() -> None:
                 print(f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, paid={paid_counts.get(key,'–')}, bestand={bestand_counts.get(isbn,'–')}, new_val={new_val}")
 
             old_val = ws[anchor_ref].value
-            ws[anchor_ref] = new_val
+            ws[anchor_ref].value = new_val
 
             hint_str = f" ({hint})" if hint else ""
             changes.append(
