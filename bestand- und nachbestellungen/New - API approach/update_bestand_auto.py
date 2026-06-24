@@ -270,7 +270,8 @@ def main() -> None:
     fach_rows: list[int] = []      # alle bisher gesehenen Fach-Zeilen (aufsteigend)
     zustand_rows: list[int] = []   # alle bisher gesehenen Zustand-Zeilen (aufsteigend)
     grade_books_cache: dict[int, list[dict]] = {}
-    processed_anchors: set[str] = set()  # verhindert Doppelbearbeitung bei Zellenverbünden
+    processed_anchors: set[str] = set()          # Zellenverbund-Dedup (gleiche Zelle)
+    processed_isbn_zustand: set[tuple[str, str]] = set()  # ISBN-Dedup (gleiche ISBN pro Zustand)
     consecutive_other = 0
     changes: list[str] = []
 
@@ -365,11 +366,18 @@ def main() -> None:
 
             if anchor_ref in processed_anchors:
                 if args.verbose:
-                    print(f"    Sp.{col_letter}: {anchor_ref} bereits verarbeitet → skip")
+                    print(f"    Sp.{col_letter}: {anchor_ref} bereits verarbeitet (Zellenverbund) → skip")
                 continue
             processed_anchors.add(anchor_ref)
 
             isbn = book["isbn"]
+            isbn_zustand_key = (isbn, zustand_norm)
+            if isbn_zustand_key in processed_isbn_zustand:
+                if args.verbose:
+                    print(f"    Sp.{col_letter}: isbn={isbn}/{zustand_label} bereits eingetragen → skip")
+                continue
+            processed_isbn_zustand.add(isbn_zustand_key)
+
             key = (grade, isbn)
             if zustand_norm == "angemeldet":
                 new_val = enrolled_counts.get(key, 0)
