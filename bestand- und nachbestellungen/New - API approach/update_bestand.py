@@ -24,8 +24,17 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from ausleihe import AusleiheClient, NotFoundError
+
+
+def resolve_anchor(ws, cell_ref: str) -> str:
+    """Gibt die Ankerzelle (oben-links) zurück, falls cell_ref Teil einer merged-range ist."""
+    for merged in ws.merged_cells.ranges:
+        if cell_ref in merged:
+            return f"{get_column_letter(merged.min_col)}{merged.min_row}"
+    return cell_ref
 
 
 def load_config() -> dict:
@@ -118,10 +127,11 @@ def main() -> None:
         if isbn not in series_total:
             not_found.append(f"{cell} (ISBN {isbn})")
             continue
-        old = ws[cell].value
+        anchor = resolve_anchor(ws, cell)
+        old = ws[anchor].value
         new = series_total[isbn]
         if old != new:
-            ws[cell] = new
+            ws[anchor] = new
             changed.append((cell, old, new, series_title[isbn]))
         else:
             unchanged += 1
@@ -159,14 +169,15 @@ def main() -> None:
             a_unchanged = 0
             a_zero: list[str] = []
             for isbn, cell in angemeldet_mappings:
+                anchor = resolve_anchor(ws, cell)
                 new = enrollment_counts.get(isbn, 0)
-                old = ws[cell].value
+                old = ws[anchor].value
                 try:
                     same = old is not None and int(old) == new
                 except (TypeError, ValueError):
                     same = False
                 if not same:
-                    ws[cell] = new
+                    ws[anchor] = new
                     a_changed.append((cell, old, new))
                 else:
                     a_unchanged += 1
