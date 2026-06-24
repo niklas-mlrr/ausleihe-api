@@ -282,8 +282,9 @@ def main() -> None:
     fach_rows: list[int] = []      # alle bisher gesehenen Fach-Zeilen (aufsteigend)
     zustand_rows: list[int] = []   # alle bisher gesehenen Zustand-Zeilen (aufsteigend)
     grade_books_cache: dict[int, list[dict]] = {}
-    processed_anchors: set[str] = set()          # Zellenverbund-Dedup (gleiche Zelle)
-    processed_isbn_zustand: set[tuple[str, str]] = set()  # ISBN-Dedup (gleiche ISBN pro Zustand)
+    processed_anchors: set[str] = set()               # Zellenverbund-Dedup (gleiche Zelle)
+    processed_bestand_isbns: set[str] = set()          # Bestand: global je ISBN nur einmal
+    processed_enrollment: set[tuple[int, str, str]] = set()  # Angemeldet/Bezahlt: je (grade, isbn, zustand)
     consecutive_other = 0
     changes: list[str] = []
 
@@ -383,12 +384,19 @@ def main() -> None:
             processed_anchors.add(anchor_ref)
 
             isbn = book["isbn"]
-            isbn_zustand_key = (isbn, zustand_norm)
-            if isbn_zustand_key in processed_isbn_zustand:
-                if args.verbose:
-                    print(f"    Sp.{col_letter}: isbn={isbn}/{zustand_label} bereits eingetragen → skip")
-                continue
-            processed_isbn_zustand.add(isbn_zustand_key)
+            if zustand_norm == "bestand":
+                if isbn in processed_bestand_isbns:
+                    if args.verbose:
+                        print(f"    Sp.{col_letter}: isbn={isbn}/Bestand bereits eingetragen → skip")
+                    continue
+                processed_bestand_isbns.add(isbn)
+            else:
+                enr_key = (grade, isbn, zustand_norm)
+                if enr_key in processed_enrollment:
+                    if args.verbose:
+                        print(f"    Sp.{col_letter}: isbn={isbn}/{zustand_label} Jg.{grade} bereits eingetragen → skip")
+                    continue
+                processed_enrollment.add(enr_key)
 
             key = (grade, isbn)
             if zustand_norm == "angemeldet":
