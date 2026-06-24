@@ -150,36 +150,22 @@ def load_grade_books(client: AusleiheClient, sy_id: str, bl_id: int) -> list[dic
     return books
 
 
-# Bekannte Abkürzungen aus Schul-Excel → alternative Suchwörter im Buchtitel
-_HINT_EXPANSIONS: dict[str, list[str]] = {
-    "ea": ["ea", "erhöhtes"],
-    "ga": ["ga", "grundlegendes"],
+# Abkürzungen die nicht literal im Buchtitel stehen, sondern als Langform erscheinen
+_HINT_EXPANSIONS: dict[str, str] = {
+    "eA": "Erhöhtes",
+    "gA": "Grundlegendes",
 }
 
 
-def _hint_in_title(hint: str, title: str) -> bool:
-    """True wenn hint (oder eine bekannte Expansion) als Wortanfang im Titel vorkommt.
-    Linke Wortgrenze wird geprüft (kein vorangehender Buchstabe/Umlaute),
-    rechtes Ende offen → passt auch auf Komposita wie "Bewegungslehre".
-    """
-    terms = _HINT_EXPANSIONS.get(hint.lower(), [hint])
-    for term in terms:
-        pattern = re.compile(
-            r"(?<![a-zA-ZäöüÄÖÜß])" + re.escape(term),
-            re.IGNORECASE,
-        )
-        if pattern.search(title):
-            return True
-    return False
-
-
 def match_book(books: list[dict], subject: str, hint: str | None) -> dict | None:
-    """Sucht passendes Buch nach Fach; Klammerzusatz wird als Titelanfang geprüft."""
+    """Sucht passendes Buch nach Fach; Klammerzusatz muss als Substring im Titel stehen."""
     candidates = [b for b in books if subject in b["subjects"]]
     if not candidates:
         return None
     if hint:
-        narrowed = [b for b in candidates if _hint_in_title(hint, b["title"])]
+        # Erst literal (case-sensitiv), dann ggf. bekannte Langform
+        search_terms = [hint, _HINT_EXPANSIONS.get(hint, "")]
+        narrowed = [b for b in candidates if any(t and t in b["title"] for t in search_terms)]
         return narrowed[0] if narrowed else None
     return candidates[0]
 
