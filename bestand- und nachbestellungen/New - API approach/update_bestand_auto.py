@@ -151,21 +151,33 @@ def load_grade_books(client: AusleiheClient, sy_id: str, bl_id: int) -> list[dic
 
 
 # Abkürzungen die nicht literal im Buchtitel stehen, sondern als Langform erscheinen
+# Schlüssel lowercase für case-insensitiven Lookup
 _HINT_EXPANSIONS: dict[str, str] = {
-    "eA": "Erhöhtes",
-    "gA": "Grundlegendes",
+    "ea": "Erhöhtes",
+    "ga": "Grundlegendes",
 }
+
+# Linke Wortgrenze: kein vorangehender Buchstabe (inkl. Umlaute)
+_LEFT_BOUNDARY = r"(?<![a-zA-ZäöüÄÖÜß])"
 
 
 def match_book(books: list[dict], subject: str, hint: str | None) -> dict | None:
-    """Sucht passendes Buch nach Fach; Klammerzusatz muss als Substring im Titel stehen."""
+    """Sucht passendes Buch nach Fach; Klammerzusatz wird case-insensitiv gesucht."""
     candidates = [b for b in books if subject in b["subjects"]]
     if not candidates:
         return None
     if hint:
-        # Erst literal (case-sensitiv), dann ggf. bekannte Langform
-        search_terms = [hint, _HINT_EXPANSIONS.get(hint, "")]
-        narrowed = [b for b in candidates if any(t and t in b["title"] for t in search_terms)]
+        terms = [hint]
+        expansion = _HINT_EXPANSIONS.get(hint.lower())
+        if expansion:
+            terms.append(expansion)
+        def in_title(title: str) -> bool:
+            t = title.lower()
+            return any(
+                re.search(_LEFT_BOUNDARY + re.escape(term.lower()), t)
+                for term in terms
+            )
+        narrowed = [b for b in candidates if in_title(b["title"])]
         return narrowed[0] if narrowed else None
     return candidates[0]
 
