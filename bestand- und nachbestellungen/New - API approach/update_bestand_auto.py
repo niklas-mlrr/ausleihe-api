@@ -150,14 +150,36 @@ def load_grade_books(client: AusleiheClient, sy_id: str, bl_id: int) -> list[dic
     return books
 
 
+# Bekannte Abkürzungen aus Schul-Excel → alternative Suchwörter im Buchtitel
+_HINT_EXPANSIONS: dict[str, list[str]] = {
+    "ea": ["ea", "erhöhtes"],
+    "ga": ["ga", "grundlegendes"],
+}
+
+
+def _hint_in_title(hint: str, title: str) -> bool:
+    """True wenn hint (oder eine bekannte Expansion) als Wortanfang im Titel vorkommt.
+    Linke Wortgrenze wird geprüft (kein vorangehender Buchstabe/Umlaute),
+    rechtes Ende offen → passt auch auf Komposita wie "Bewegungslehre".
+    """
+    terms = _HINT_EXPANSIONS.get(hint.lower(), [hint])
+    for term in terms:
+        pattern = re.compile(
+            r"(?<![a-zA-ZäöüÄÖÜß])" + re.escape(term),
+            re.IGNORECASE,
+        )
+        if pattern.search(title):
+            return True
+    return False
+
+
 def match_book(books: list[dict], subject: str, hint: str | None) -> dict | None:
-    """Sucht passendes Buch nach Fach; Klammerzusatz muss als ganzes Wort im Titel stehen."""
+    """Sucht passendes Buch nach Fach; Klammerzusatz wird als Titelanfang geprüft."""
     candidates = [b for b in books if subject in b["subjects"]]
     if not candidates:
         return None
     if hint:
-        pattern = re.compile(r"\b" + re.escape(hint) + r"\b", re.IGNORECASE)
-        narrowed = [b for b in candidates if pattern.search(b["title"])]
+        narrowed = [b for b in candidates if _hint_in_title(hint, b["title"])]
         return narrowed[0] if narrowed else None
     return candidates[0]
 
@@ -193,6 +215,12 @@ def fetch_enrollment_counts_by_grade(
                 paid[key] = paid.get(key, 0) + 1
 
     return enrolled, paid
+
+
+def fetch_bestand_by_isbn(client: AusleiheClient) -> dict[str, int]:
+    """Gesamtbestand (Exemplaranzahl) pro ISBN aus allen Serien."""
+    series_list = client.series.get_all(detailed=True)
+    return {s.isbn: (s.total or 0) for s in series_list if s.isbn}
 
 
 # ── Hauptalgorithmus ──────────────────────────────────────────────────────────
@@ -231,11 +259,17 @@ def main() -> None:
     print("Lade Anmeldungen...")
     enrolled_counts, paid_counts = fetch_enrollment_counts_by_grade(client, sy_id)
 
+    # Bestand (Exemplaranzahl) pro ISBN laden
+    print("Lade Bestand...")
+    bestand_counts = fetch_bestand_by_isbn(client)
+
     if args.verbose:
         print(f"  enrolled_counts: {len(enrolled_counts)} Einträge, paid_counts: {len(paid_counts)} Einträge")
+        print(f"  bestand_counts:  {len(bestand_counts)} Serien")
         sample = list(enrolled_counts.items())[:5]
         for k, v in sample:
-            print(f"    enrolled {k} = {v}, paid = {paid_counts.get(k, 0)}")
+            isbn = k[1]
+            print(f"    {k}: enrolled={v}, paid={paid_counts.get(k, 0)}, bestand={bestand_counts.get(isbn, 0)}")
 
     wb = load_workbook(str(excel_path))
     ws = wb[sheet_name]
@@ -320,9 +354,9 @@ def main() -> None:
                     print(f"    Sp.{col_letter}: kein Zustand-Label → skip")
                 continue
             zustand_norm = zustand_label.strip().lower()
-            if zustand_norm not in ("angemeldet", "bezahlt"):
+            if zustand_norm not in ("angemeldet", "bezahlt", "bestand"):
                 if args.verbose:
-                    print(f"    Sp.{col_letter}: Zustand={zustand_label!r} (nicht angemeldet/bezahlt) → skip")
+                    print(f"    Sp.{col_letter}: Zustand={zustand_label!r} (nicht angemeldet/bezahlt/bestand) → skip")
                 continue
 
             # Fach-Label für diese Spalte bestimmen (mit Fallback auf höhere Fach-Zeilen)
@@ -353,11 +387,13 @@ def main() -> None:
             key = (grade, isbn)
             if zustand_norm == "angemeldet":
                 new_val = enrolled_counts.get(key, 0)
-            else:  # bezahlt
+            elif zustand_norm == "bezahlt":
                 new_val = paid_counts.get(key, 0)
+            else:  # bestand
+                new_val = bestand_counts.get(isbn, 0)
 
             if args.verbose:
-                print(f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, paid={paid_counts.get(key,'–')}, new_val={new_val}")
+                print(f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, paid={paid_counts.get(key,'–')}, bestand={bestand_counts.get(isbn,'–')}, new_val={new_val}")
 
             old_val = ws[anchor_ref].value
             ws[anchor_ref] = new_val
