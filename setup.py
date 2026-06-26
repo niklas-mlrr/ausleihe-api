@@ -13,7 +13,7 @@ setup(
     ],
     extras_require={
         # Excel-Bestands-/Nachbestellungs-Tooling
-        "bestand": ["openpyxl>=3.1.0"],
+        "bestand": ["openpyxl>=3.1.0", "isbnlib>=3.10"],
         # Entwicklung / Tests
         "dev": ["pytest>=7.0"],
     },
