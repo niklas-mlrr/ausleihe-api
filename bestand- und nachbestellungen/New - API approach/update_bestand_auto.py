@@ -537,7 +537,7 @@ def main() -> None:
             price = sd.get("price", 0.0)
             title = sd.get("title") or entry["title"]
             isbn_fmt = format_isbn(isbn)
-            grades_str = str(min(entry["grades"]))
+            grades_str = min(entry["grades"])
             fach = entry["fach"]
             zu_bestellen_rows.append(
                 (grades_str, fach, zu_bestellen + 5, title, publisher, isbn_fmt, price)
@@ -563,7 +563,7 @@ def main() -> None:
 
     print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
     for grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
-        print(f"  Jg.{grades_str} [{fach}] +5 → {stueckzahl} Stk.  {title[:45]}  [{isbn_fmt}]")
+        print(f"  Jg.{grades_str:2d} [{fach}] +5 → {stueckzahl} Stk.  {title[:45]}  [{isbn_fmt}]")
 
     # ── Ausgabe & Speichern ──────────────────────────────────────────────────
     print()
