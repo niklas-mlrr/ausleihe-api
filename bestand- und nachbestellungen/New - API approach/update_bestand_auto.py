@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Auto-Discovery: befüllt 'Angemeldet'- und 'Bezahlt'-Zellen automatisch.
+"""Auto-Discovery: befüllt 'Angemeldet'-, 'Bezahlt'-, 'Bestellt'- und 'Bestand'-Zellen
+automatisch und trägt Nachbestellbedarf in das Sheet 'zu Bestellen' ein.
 
 Im Unterschied zu update_bestand.py braucht dieses Skript keine config.json-Mappings.
 Es liest die Excel-Struktur selbst aus und matched Bücher anhand von Fach-Zeilen.
@@ -14,14 +15,19 @@ Algorithmus:
       - Falls Fach-Zelle leer → nächst höhere Fach-Zeile als Fallback
   - Zustand-Label aus nächster darüber liegender Zustand-Zeile bestimmen
       - Falls leer → Fallback auf nächst höhere Zustand-Zeile
-  - Passt das Buch und ist Zustand "Angemeldet" oder "Bezahlt" → Wert eintragen
+  - Passt das Buch und ist Zustand "Angemeldet", "Bezahlt", "Bestand" oder "Bestellt" → Wert eintragen
+    - "Bestellt": Summe aus Sheet "bestellt" Spalte C für alle Zeilen wo Spalte F (ISBN, "-" ignoriert) passt;
+      None wenn ISBN dort nicht vorkommt
   - Bereits bearbeitete Ankerzellen überspringen (Mehrjahresbände / Zellenverbünde)
   - Abbruch nach mehr als 3 nicht identifizierbaren Zeilen in Folge
+  - Am Ende: Sheet "zu Bestellen" ab Zeile 2 leeren und mit Büchern befüllen,
+    bei denen (Angemeldet - Bestand - Bestellt) > 0 ist.
 
 Verwendung:
     python3 update_bestand_auto.py [--dry-run] [--schoolyear 2025/2026]
                                    [--excel "Bestand- und Nachbestellungsliste 2026.xlsx"]
                                    [--sheet "Bestand- und Nachbestellung"]
+                                   [-v | --verbose]
 
 Nur GET-Zugriffe auf die API. Kein Schreiben in die Datenbank.
 """
@@ -43,6 +49,18 @@ load_dotenv(_ROOT / ".env")
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+
+try:
+    import isbnlib as _isbnlib
+    def format_isbn(isbn: str) -> str:
+        try:
+            masked = _isbnlib.mask(isbn)
+            return masked if masked else isbn
+        except Exception:
+            return isbn
+except ImportError:
+    def format_isbn(isbn: str) -> str:  # type: ignore[misc]
+        return isbn
 
 from ausleihe import AusleiheClient, NotFoundError
 
@@ -215,10 +233,47 @@ def fetch_enrollment_counts_by_grade(
     return enrolled, paid
 
 
+def fetch_series_data(client: AusleiheClient) -> dict[str, dict]:
+    """Lädt alle Serien; gibt pro ISBN ein Dict mit 'total', 'publisher', 'price'."""
+    series_list = client.series.get_all(detailed=True)
+    return {
+        s.isbn: {
+            "total": s.total or 0,
+            "publisher": s.publisher or "",
+            "price": s.price or 0.0,
+            "title": s.title or "",
+        }
+        for s in series_list
+        if s.isbn
+    }
+
+
 def fetch_bestand_by_isbn(client: AusleiheClient) -> dict[str, int]:
     """Gesamtbestand (Exemplaranzahl) pro ISBN aus allen Serien."""
     series_list = client.series.get_all(detailed=True)
     return {s.isbn: (s.total or 0) for s in series_list if s.isbn}
+
+
+def load_bestellt_counts(ws_bestellt) -> dict[str, int]:
+    """Liest Sheet 'bestellt': Spalte F = ISBN (evtl. mit '-'), Spalte C = Stückzahl.
+    Gibt pro normierter ISBN (ohne '-') die Summe aller Stückzahlen zurück.
+    Zeile 1 (Kopfzeile) wird übersprungen.
+    """
+    counts: dict[str, int] = {}
+    for row in range(2, ws_bestellt.max_row + 1):
+        isbn_raw = ws_bestellt.cell(row, 6).value  # Spalte F
+        count_raw = ws_bestellt.cell(row, 3).value  # Spalte C
+        if isbn_raw is None or count_raw is None:
+            continue
+        isbn_norm = str(isbn_raw).replace("-", "").strip()
+        if not isbn_norm:
+            continue
+        try:
+            count = int(count_raw)
+        except (ValueError, TypeError):
+            continue
+        counts[isbn_norm] = counts.get(isbn_norm, 0) + count
+    return counts
 
 
 # ── Hauptalgorithmus ──────────────────────────────────────────────────────────
@@ -257,20 +312,30 @@ def main() -> None:
     print("Lade Anmeldungen...")
     enrolled_counts, paid_counts = fetch_enrollment_counts_by_grade(client, sy_id)
 
-    # Bestand (Exemplaranzahl) pro ISBN laden
-    print("Lade Bestand...")
-    bestand_counts = fetch_bestand_by_isbn(client)
+    # Serien-Daten (Bestand, Verlag, Preis) laden
+    print("Lade Serien-Daten...")
+    series_data = fetch_series_data(client)
+    bestand_counts = {isbn: d["total"] for isbn, d in series_data.items()}
 
     if args.verbose:
         print(f"  enrolled_counts: {len(enrolled_counts)} Einträge, paid_counts: {len(paid_counts)} Einträge")
-        print(f"  bestand_counts:  {len(bestand_counts)} Serien")
+        print(f"  series_data:     {len(series_data)} Serien")
         sample = list(enrolled_counts.items())[:5]
         for k, v in sample:
             isbn = k[1]
-            print(f"    {k}: enrolled={v}, paid={paid_counts.get(k, 0)}, bestand={bestand_counts.get(isbn, 0)}")
+            sd = series_data.get(isbn, {})
+            print(f"    {k}: enrolled={v}, paid={paid_counts.get(k, 0)}, bestand={sd.get('total', 0)}")
 
     wb = load_workbook(str(excel_path))
     ws = wb[sheet_name]
+
+    # "bestellt"-Sheet einlesen
+    ws_bestellt = wb["bestellt"]
+    bestellt_counts = load_bestellt_counts(ws_bestellt)
+    if args.verbose:
+        print(f"\nbestellt-Sheet: {len(bestellt_counts)} ISBNs mit Bestellungen")
+        for isbn_norm, cnt in bestellt_counts.items():
+            print(f"  {isbn_norm}: {cnt}")
 
     if args.verbose:
         print(f"\nExcel geladen: {ws.max_row} Zeilen, {ws.max_column} Spalten")
@@ -284,9 +349,15 @@ def main() -> None:
     grade_books_cache: dict[int, list[dict]] = {}
     processed_anchors: set[str] = set()               # Zellenverbund-Dedup (gleiche Zelle)
     processed_bestand_isbns: set[str] = set()          # Bestand: global je ISBN nur einmal
+    processed_bestellt_isbns: set[str] = set()         # Bestellt: global je ISBN nur einmal
     processed_enrollment: set[tuple[int, str, str]] = set()  # Angemeldet/Bezahlt: je (grade, isbn, zustand)
     consecutive_other = 0
     changes: list[str] = []
+
+    # Sammelt pro ISBN die geschriebenen Werte für die "zu Bestellen"-Ausgabe.
+    # isbn → {"angemeldet": int, "bestand": int, "bestellt": int|None, "title": str}
+    # (grade-unabhängig: Summe über alle Jahrgänge)
+    zu_bestellen_data: dict[str, dict] = {}
 
     print("\nAnalysiere Excel-Struktur...\n")
 
@@ -354,9 +425,9 @@ def main() -> None:
                     print(f"    Sp.{col_letter}: kein Zustand-Label → skip")
                 continue
             zustand_norm = zustand_label.strip().lower()
-            if zustand_norm not in ("angemeldet", "bezahlt", "bestand"):
+            if zustand_norm not in ("angemeldet", "bezahlt", "bestand", "bestellt"):
                 if args.verbose:
-                    print(f"    Sp.{col_letter}: Zustand={zustand_label!r} (nicht angemeldet/bezahlt/bestand) → skip")
+                    print(f"    Sp.{col_letter}: Zustand={zustand_label!r} (nicht angemeldet/bezahlt/bestand/bestellt) → skip")
                 continue
 
             # Fach-Label für diese Spalte bestimmen (mit Fallback auf höhere Fach-Zeilen)
@@ -390,6 +461,12 @@ def main() -> None:
                         print(f"    Sp.{col_letter}: isbn={isbn}/Bestand bereits eingetragen → skip")
                     continue
                 processed_bestand_isbns.add(isbn)
+            elif zustand_norm == "bestellt":
+                if isbn in processed_bestellt_isbns:
+                    if args.verbose:
+                        print(f"    Sp.{col_letter}: isbn={isbn}/Bestellt bereits eingetragen → skip")
+                    continue
+                processed_bestellt_isbns.add(isbn)
             else:
                 enr_key = (grade, isbn, zustand_norm)
                 if enr_key in processed_enrollment:
@@ -400,14 +477,37 @@ def main() -> None:
 
             key = (grade, isbn)
             if zustand_norm == "angemeldet":
-                new_val = enrolled_counts.get(key, 0)
+                new_val: int | None = enrolled_counts.get(key, 0)
             elif zustand_norm == "bezahlt":
                 new_val = paid_counts.get(key, 0)
-            else:  # bestand
+            elif zustand_norm == "bestand":
                 new_val = bestand_counts.get(isbn, 0)
+            else:  # bestellt
+                isbn_norm = isbn.replace("-", "")
+                new_val = bestellt_counts.get(isbn_norm) if isbn_norm in bestellt_counts else None
+
+            # Tracking für "zu Bestellen"-Sheet
+            entry = zu_bestellen_data.setdefault(isbn, {
+                "angemeldet": 0,
+                "bestand": 0,
+                "bestellt": None,
+                "title": book["title"],
+            })
+            if zustand_norm == "angemeldet" and new_val is not None:
+                entry["angemeldet"] = (entry["angemeldet"] or 0) + new_val
+            elif zustand_norm == "bestand" and new_val is not None:
+                entry["bestand"] = new_val
+            elif zustand_norm == "bestellt":
+                entry["bestellt"] = new_val
 
             if args.verbose:
-                print(f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, paid={paid_counts.get(key,'–')}, bestand={bestand_counts.get(isbn,'–')}, new_val={new_val}")
+                isbn_norm = isbn.replace("-", "")
+                print(
+                    f"    Sp.{col_letter}: {anchor_ref} {fach_val!r}/{zustand_label} → "
+                    f"isbn={isbn}, enrolled={enrolled_counts.get(key,'–')}, "
+                    f"paid={paid_counts.get(key,'–')}, bestand={bestand_counts.get(isbn,'–')}, "
+                    f"bestellt_sheet={bestellt_counts.get(isbn_norm,'–')}, new_val={new_val}"
+                )
 
             old_val = ws[anchor_ref].value
             ws[anchor_ref].value = new_val
@@ -417,6 +517,44 @@ def main() -> None:
                 f"  {anchor_ref}: {old_val!r} -> {new_val!r}"
                 f"  [{subject}{hint_str} Jg.{grade}, {book['title']}, {zustand_label}]"
             )
+
+    # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
+    ws_zu = wb["zu Bestellen"]
+
+    # Zeilen 2+ leeren (Spalten A–G)
+    zu_bestellen_rows: list[tuple] = []  # (zu_bestellen_count, title, publisher, isbn_fmt, price)
+    for isbn, entry in zu_bestellen_data.items():
+        angemeldet = entry["angemeldet"] or 0
+        bestand = entry["bestand"] or 0
+        bestellt = entry["bestellt"] or 0
+        zu_bestellen = angemeldet - bestand - bestellt
+        if zu_bestellen > 0:
+            sd = series_data.get(isbn, {})
+            publisher = sd.get("publisher", "")
+            price = sd.get("price", 0.0)
+            title = sd.get("title") or entry["title"]
+            isbn_fmt = format_isbn(isbn)
+            zu_bestellen_rows.append((zu_bestellen + 5, title, publisher, isbn_fmt, price))
+
+    zu_bestellen_rows.sort(key=lambda r: r[1])  # alphabetisch nach Titel
+
+    # Alte Einträge ab Zeile 2 löschen
+    for row in range(2, ws_zu.max_row + 1):
+        for col in (2, 3, 4, 5, 6):  # B–F
+            ws_zu.cell(row, col).value = None
+
+    # Neue Einträge schreiben
+    for i, (stueckzahl, title, publisher, isbn_fmt, price) in enumerate(zu_bestellen_rows):
+        row = 2 + i
+        ws_zu.cell(row, 2).value = stueckzahl   # B: Stückzahl
+        ws_zu.cell(row, 3).value = title         # C: Titel
+        ws_zu.cell(row, 4).value = publisher     # D: Verlag
+        ws_zu.cell(row, 5).value = isbn_fmt      # E: ISBN
+        ws_zu.cell(row, 6).value = price         # F: Einzelpreis
+
+    print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
+    for stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
+        print(f"  +5 → {stueckzahl} Stk.  {title[:50]}  [{isbn_fmt}]")
 
     # ── Ausgabe & Speichern ──────────────────────────────────────────────────
     print()
@@ -430,7 +568,7 @@ def main() -> None:
     else:
         print("Keine Änderungen.")
 
-    if changes and not args.dry_run:
+    if not args.dry_run:
         wb.save(str(excel_path))
         print(f"\nGespeichert: {excel_path}")
 
