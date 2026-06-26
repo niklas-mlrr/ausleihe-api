@@ -355,8 +355,8 @@ def main() -> None:
     changes: list[str] = []
 
     # Sammelt pro ISBN die geschriebenen Werte für die "zu Bestellen"-Ausgabe.
-    # isbn → {"angemeldet": int, "bestand": int, "bestellt": int|None, "title": str}
-    # (grade-unabhängig: Summe über alle Jahrgänge)
+    # isbn → {"angemeldet": int, "bestand": int, "bestellt": int|None,
+    #          "title": str, "grades": set[int], "fach": str}
     zu_bestellen_data: dict[str, dict] = {}
 
     print("\nAnalysiere Excel-Struktur...\n")
@@ -492,7 +492,10 @@ def main() -> None:
                 "bestand": 0,
                 "bestellt": None,
                 "title": book["title"],
+                "grades": set(),
+                "fach": fach_val,
             })
+            entry["grades"].add(grade)
             if zustand_norm == "angemeldet" and new_val is not None:
                 entry["angemeldet"] = (entry["angemeldet"] or 0) + new_val
             elif zustand_norm == "bestand" and new_val is not None:
@@ -521,8 +524,8 @@ def main() -> None:
     # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
     ws_zu = wb["zu Bestellen"]
 
-    # Zeilen 2+ leeren (Spalten A–G)
-    zu_bestellen_rows: list[tuple] = []  # (zu_bestellen_count, title, publisher, isbn_fmt, price)
+    # Spalten: B=Jahrgänge, C=Fach, D=Stückzahl, E=Titel, F=Verlag, G=ISBN, H=Neupreis
+    zu_bestellen_rows: list[tuple] = []
     for isbn, entry in zu_bestellen_data.items():
         angemeldet = entry["angemeldet"] or 0
         bestand = entry["bestand"] or 0
@@ -534,27 +537,33 @@ def main() -> None:
             price = sd.get("price", 0.0)
             title = sd.get("title") or entry["title"]
             isbn_fmt = format_isbn(isbn)
-            zu_bestellen_rows.append((zu_bestellen + 5, title, publisher, isbn_fmt, price))
+            grades_str = ", ".join(str(g) for g in sorted(entry["grades"]))
+            fach = entry["fach"]
+            zu_bestellen_rows.append(
+                (grades_str, fach, zu_bestellen + 5, title, publisher, isbn_fmt, price)
+            )
 
-    zu_bestellen_rows.sort(key=lambda r: r[1])  # alphabetisch nach Titel
+    zu_bestellen_rows.sort(key=lambda r: r[3])  # alphabetisch nach Titel
 
-    # Alte Einträge ab Zeile 2 löschen
+    # Alte Einträge ab Zeile 2 löschen (Spalten B–H)
     for row in range(2, ws_zu.max_row + 1):
-        for col in (2, 3, 4, 5, 6):  # B–F
+        for col in range(2, 9):  # B–H
             ws_zu.cell(row, col).value = None
 
     # Neue Einträge schreiben
-    for i, (stueckzahl, title, publisher, isbn_fmt, price) in enumerate(zu_bestellen_rows):
+    for i, (grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price) in enumerate(zu_bestellen_rows):
         row = 2 + i
-        ws_zu.cell(row, 2).value = stueckzahl   # B: Stückzahl
-        ws_zu.cell(row, 3).value = title         # C: Titel
-        ws_zu.cell(row, 4).value = publisher     # D: Verlag
-        ws_zu.cell(row, 5).value = isbn_fmt      # E: ISBN
-        ws_zu.cell(row, 6).value = price         # F: Einzelpreis
+        ws_zu.cell(row, 2).value = grades_str   # B: Jahrgänge
+        ws_zu.cell(row, 3).value = fach          # C: Fach
+        ws_zu.cell(row, 4).value = stueckzahl    # D: Stückzahl
+        ws_zu.cell(row, 5).value = title         # E: Titel
+        ws_zu.cell(row, 6).value = publisher     # F: Verlag
+        ws_zu.cell(row, 7).value = isbn_fmt      # G: ISBN
+        ws_zu.cell(row, 8).value = price         # H: Einzelpreis
 
     print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
-    for stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
-        print(f"  +5 → {stueckzahl} Stk.  {title[:50]}  [{isbn_fmt}]")
+    for grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
+        print(f"  Jg.{grades_str} [{fach}] +5 → {stueckzahl} Stk.  {title[:45]}  [{isbn_fmt}]")
 
     # ── Ausgabe & Speichern ──────────────────────────────────────────────────
     print()
