@@ -537,7 +537,7 @@ def main() -> None:
             price = sd.get("price", 0.0)
             title = sd.get("title") or entry["title"]
             isbn_fmt = format_isbn(isbn)
-            grades_str = ", ".join(str(g) for g in sorted(entry["grades"]))
+            grades_str = str(min(entry["grades"]))
             fach = entry["fach"]
             zu_bestellen_rows.append(
                 (grades_str, fach, zu_bestellen + 5, title, publisher, isbn_fmt, price)
