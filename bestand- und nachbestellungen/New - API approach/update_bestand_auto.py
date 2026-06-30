@@ -49,7 +49,7 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 try:
     import isbnlib as _isbnlib
@@ -561,6 +561,42 @@ def main() -> None:
     # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
     ws_zu = wb["zu Bestellen"]
 
+    # Tabelle dynamisch ermitteln – der Name kann sich ändern, daher nicht darauf
+    # verlassen. Es gibt genau eine Tabelle auf diesem Blatt.
+    if not ws_zu.tables:
+        raise RuntimeError("Sheet 'zu Bestellen' enthält keine Tabelle.")
+    table_name = next(iter(ws_zu.tables))
+    table = ws_zu.tables[table_name]
+    t_min_col, header_row, t_max_col, t_old_max_row = range_boundaries(table.ref)
+    first_data_row = header_row + 1
+    bestellnr_col = t_min_col      # Spalte A: "Bestell Nr."
+    gesamtpreis_col = t_max_col    # Spalte I: "Gesamtpreis (brutto)" (Formel)
+
+    # Strukturierte-Referenz-Formel für die Gesamtpreis-Spalte; Tabellenname und
+    # Spaltennamen werden dynamisch aus der aktuellen Tabelle gelesen.
+    qty_col_name = table.tableColumns[3].name    # "Stückzahl"
+    price_col_name = table.tableColumns[7].name  # "Einzelpreis (brutto)"
+    def gesamtpreis_formula() -> str:
+        tn = table_name
+        return (
+            f'=IF(OR({tn}[[#This Row],[{qty_col_name}]]="",'
+            f'{tn}[[#This Row],[{price_col_name}]]=""),"",'
+            f'{tn}[[#This Row],[{qty_col_name}]]*{tn}[[#This Row],[{price_col_name}]])'
+        )
+
+    # Bestehende "Bestell Nr." (Spalte A) je ISBN merken, damit sie nach dem
+    # Neu-Sortieren bei übereinstimmender ISBN wieder vor der richtigen Buchreihe
+    # steht; sonst entfällt sie.
+    def _norm_isbn(v) -> str:
+        return re.sub(r"[^0-9Xx]", "", str(v)) if v is not None else ""
+    isbn_col = 7  # Spalte G
+    bestellnr_by_isbn: dict[str, object] = {}
+    for row in range(first_data_row, t_old_max_row + 1):
+        isbn_key = _norm_isbn(ws_zu.cell(row, isbn_col).value)
+        a_val = ws_zu.cell(row, bestellnr_col).value
+        if isbn_key and a_val is not None:
+            bestellnr_by_isbn[isbn_key] = a_val
+
     # Spalten: B=Jahrgänge, C=Fach, D=Stückzahl, E=Titel, F=Verlag, G=ISBN, H=Neupreis
     zu_bestellen_rows: list[tuple] = []
     for isbn, entry in zu_bestellen_data.items():
@@ -582,14 +618,16 @@ def main() -> None:
 
     zu_bestellen_rows.sort(key=lambda r: r[3])  # alphabetisch nach Titel
 
-    # Alte Einträge ab Zeile 2 löschen (Spalten B–H)
-    for row in range(2, ws_zu.max_row + 1):
-        for col in range(2, 9):  # B–H
+    # Gesamten vorherigen Tabellenbereich (Spalten A–I, ab Datenzeile) leeren –
+    # damit beim Verkleinern alles aus dem alten Bereich verschwindet.
+    for row in range(first_data_row, t_old_max_row + 1):
+        for col in range(t_min_col, t_max_col + 1):
             ws_zu.cell(row, col).value = None
 
-    # Neue Einträge schreiben
+    # Neue Einträge schreiben (A = Bestell Nr. erhalten, B–H Daten)
     for i, (grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price) in enumerate(zu_bestellen_rows):
-        row = 2 + i
+        row = first_data_row + i
+        ws_zu.cell(row, bestellnr_col).value = bestellnr_by_isbn.get(_norm_isbn(isbn_fmt))  # A
         ws_zu.cell(row, 2).value = grades_str   # B: Jahrgänge
         ws_zu.cell(row, 3).value = fach          # C: Fach
         ws_zu.cell(row, 4).value = stueckzahl    # D: Stückzahl
@@ -597,6 +635,20 @@ def main() -> None:
         ws_zu.cell(row, 6).value = publisher     # F: Verlag
         ws_zu.cell(row, 7).value = isbn_fmt      # G: ISBN
         ws_zu.cell(row, 8).value = price         # H: Einzelpreis
+
+    # Tabellengröße an den Inhalt anpassen – mindestens 2 Zeilen (Kopf + 1).
+    new_last_row = max(header_row + 1, header_row + len(zu_bestellen_rows))
+    # Gesamtpreis-Formel (Spalte I) in allen Datenzeilen der Tabelle setzen,
+    # inkl. evtl. leerer Pflicht-Datenzeile.
+    for row in range(first_data_row, new_last_row + 1):
+        ws_zu.cell(row, gesamtpreis_col).value = gesamtpreis_formula()
+    new_ref = (
+        f"{get_column_letter(t_min_col)}{header_row}:"
+        f"{get_column_letter(t_max_col)}{new_last_row}"
+    )
+    table.ref = new_ref
+    if table.autoFilter is not None:
+        table.autoFilter.ref = new_ref
 
     print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
     for grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
