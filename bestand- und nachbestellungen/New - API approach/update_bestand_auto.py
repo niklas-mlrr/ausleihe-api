@@ -66,6 +66,12 @@ except ImportError:
 from ausleihe import AusleiheClient, NotFoundError
 
 
+# Excel-Anzeigeformat der "Stand"-Zelle: z.B. "Dienstag, 30.06.2026 17:25:05"
+# (TTTT, TT.MM.JJJJ hh:mm:ss). Punkte/Komma/Leerzeichen sind escaped (literal),
+# der Wert selbst ist ein echtes datetime → Excel rendert es über dieses Format.
+STAND_NUMBER_FORMAT = r"dddd\,\ dd\.mm\.yyyy\ hh:mm:ss"
+
+
 # ── Excel-Hilfsfunktionen ─────────────────────────────────────────────────────
 
 def resolve_anchor(ws, row: int, col: int) -> tuple[int, int]:
@@ -292,8 +298,9 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Detaillierte Debug-Ausgaben")
     args = parser.parse_args()
 
-    # Abfragezeitpunkt (für "Stand"-Zeile), Format TT.MM.JJJJ hh:mm:ss
-    abfrage_zeitpunkt = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    # Abfragezeitpunkt (für "Stand"-Zeile) – echtes datetime, damit Excel es über
+    # das Zellen-Datumsformat als "TTTT, TT.MM.JJJJ hh:mm:ss" anzeigt.
+    abfrage_zeitpunkt = datetime.now()
 
     print(f"Verbinde mit IServ ({os.environ.get('ISERV_DOMAIN', '?')})...")
     client = AusleiheClient()
@@ -539,10 +546,15 @@ def main() -> None:
     # In Spalte B jeder erkannten Stand-Zeile, Format TT.MM.JJJJ hh:mm:ss
     for stand_row in stand_rows:
         ar, ac = resolve_anchor(ws, stand_row, 2)  # Spalte B
+        cell = ws.cell(ar, ac)
         anchor_ref = f"{get_column_letter(ac)}{ar}"
-        old_val = ws[anchor_ref].value
-        ws[anchor_ref].value = abfrage_zeitpunkt
-        changes.append(f"  {anchor_ref}: {old_val!r} -> {abfrage_zeitpunkt!r}  [Stand/Abfragezeitpunkt]")
+        old_val = cell.value
+        cell.value = abfrage_zeitpunkt              # echtes datetime (Excel-Datumswert)
+        cell.number_format = STAND_NUMBER_FORMAT    # Anzeige: TTTT, TT.MM.JJJJ hh:mm:ss
+        changes.append(
+            f"  {anchor_ref}: {old_val!r} -> "
+            f"{abfrage_zeitpunkt.strftime('%d.%m.%Y %H:%M:%S')}  [Stand/Abfragezeitpunkt]"
+        )
 
     # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
     ws_zu = wb["zu Bestellen"]
