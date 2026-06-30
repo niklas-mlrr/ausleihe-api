@@ -300,7 +300,9 @@ def main() -> None:
 
     # Abfragezeitpunkt (für "Stand"-Zeile) – echtes datetime, damit Excel es über
     # das Zellen-Datumsformat als "TTTT, TT.MM.JJJJ hh:mm:ss" anzeigt.
-    abfrage_zeitpunkt = datetime.now()
+    # Mikrosekunden verwerfen: sonst rundet Excel den Serienwert auf die nächste
+    # Sekunde, während die Konsolenausgabe (strftime) abschneidet → 1s Differenz.
+    abfrage_zeitpunkt = datetime.now().replace(microsecond=0)
 
     print(f"Verbinde mit IServ ({os.environ.get('ISERV_DOMAIN', '?')})...")
     client = AusleiheClient()
