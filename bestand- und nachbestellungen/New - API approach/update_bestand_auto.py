@@ -38,6 +38,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 _HERE = Path(__file__).parent
@@ -106,12 +107,14 @@ def find_zustand_for_col(ws, zustand_rows: list[int], col: int) -> str | None:
 # ── Zeilen-Klassifikation ─────────────────────────────────────────────────────
 
 def classify_row(ws, row: int) -> str:
-    """'fach' | 'zustand' | 'jahrgang' | 'other'"""
+    """'fach' | 'zustand' | 'stand' | 'jahrgang' | 'other'"""
     val = ws.cell(row, 1).value
     if val == "Fach":
         return "fach"
     if val == "Zustand":
         return "zustand"
+    if val == "Stand":
+        return "stand"
     if isinstance(val, str) and re.match(r"Jahrgang\s+\d+", val):
         return "jahrgang"
     return "other"
@@ -289,6 +292,9 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="Detaillierte Debug-Ausgaben")
     args = parser.parse_args()
 
+    # Abfragezeitpunkt (für "Stand"-Zeile), Format TT.MM.JJJJ hh:mm:ss
+    abfrage_zeitpunkt = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
     print(f"Verbinde mit IServ ({os.environ.get('ISERV_DOMAIN', '?')})...")
     client = AusleiheClient()
 
@@ -346,6 +352,7 @@ def main() -> None:
 
     fach_rows: list[int] = []      # alle bisher gesehenen Fach-Zeilen (aufsteigend)
     zustand_rows: list[int] = []   # alle bisher gesehenen Zustand-Zeilen (aufsteigend)
+    stand_rows: list[int] = []     # alle bisher gesehenen Stand-Zeilen (für Abfragezeitpunkt)
     grade_books_cache: dict[int, list[dict]] = {}
     processed_anchors: set[str] = set()               # Zellenverbund-Dedup (gleiche Zelle)
     processed_bestand_isbns: set[str] = set()          # Bestand: global je ISBN nur einmal
@@ -376,6 +383,13 @@ def main() -> None:
             consecutive_other = 0
             if args.verbose:
                 print(f"  Zeile {row}: ZUSTAND erkannt")
+            continue
+
+        if row_type == "stand":
+            stand_rows.append(row)
+            consecutive_other = 0
+            if args.verbose:
+                print(f"  Zeile {row}: STAND erkannt")
             continue
 
         if row_type == "other":
@@ -520,6 +534,15 @@ def main() -> None:
                 f"  {anchor_ref}: {old_val!r} -> {new_val!r}"
                 f"  [{subject}{hint_str} Jg.{grade}, {book['title']}, {zustand_label}]"
             )
+
+    # ── Abfragezeitpunkt in "Stand"-Zeile(n) eintragen ───────────────────────
+    # In Spalte B jeder erkannten Stand-Zeile, Format TT.MM.JJJJ hh:mm:ss
+    for stand_row in stand_rows:
+        ar, ac = resolve_anchor(ws, stand_row, 2)  # Spalte B
+        anchor_ref = f"{get_column_letter(ac)}{ar}"
+        old_val = ws[anchor_ref].value
+        ws[anchor_ref].value = abfrage_zeitpunkt
+        changes.append(f"  {anchor_ref}: {old_val!r} -> {abfrage_zeitpunkt!r}  [Stand/Abfragezeitpunkt]")
 
     # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
     ws_zu = wb["zu Bestellen"]
