@@ -568,9 +568,17 @@ def main() -> None:
     table_name = next(iter(ws_zu.tables))
     table = ws_zu.tables[table_name]
     t_min_col, header_row, t_max_col, t_old_max_row = range_boundaries(table.ref)
+    totals_count = table.totalsRowCount or 0   # Ergebniszeile (eigene Zeile am Ende)
     first_data_row = header_row + 1
+    old_data_last = t_old_max_row - totals_count  # letzte Datenzeile (ohne Ergebnis)
     bestellnr_col = t_min_col      # Spalte A: "Bestell Nr."
     gesamtpreis_col = t_max_col    # Spalte I: "Gesamtpreis (brutto)" (Formel)
+
+    # SUBTOTAL-Funktionscodes für die Ergebniszeile (totalsRowFunction → Code)
+    _SUBTOTAL_FUNC = {
+        "sum": 109, "count": 103, "countNums": 102, "average": 101,
+        "max": 104, "min": 105, "stdDev": 107, "var": 110,
+    }
 
     # Strukturierte-Referenz-Formel für die Gesamtpreis-Spalte; Tabellenname und
     # Spaltennamen werden dynamisch aus der aktuellen Tabelle gelesen.
@@ -591,7 +599,7 @@ def main() -> None:
         return re.sub(r"[^0-9Xx]", "", str(v)) if v is not None else ""
     isbn_col = 7  # Spalte G
     bestellnr_by_isbn: dict[str, object] = {}
-    for row in range(first_data_row, t_old_max_row + 1):
+    for row in range(first_data_row, old_data_last + 1):  # Ergebniszeile ausnehmen
         isbn_key = _norm_isbn(ws_zu.cell(row, isbn_col).value)
         a_val = ws_zu.cell(row, bestellnr_col).value
         if isbn_key and a_val is not None:
@@ -636,19 +644,39 @@ def main() -> None:
         ws_zu.cell(row, 7).value = isbn_fmt      # G: ISBN
         ws_zu.cell(row, 8).value = price         # H: Einzelpreis
 
-    # Tabellengröße an den Inhalt anpassen – mindestens 2 Zeilen (Kopf + 1).
-    new_last_row = max(header_row + 1, header_row + len(zu_bestellen_rows))
-    # Gesamtpreis-Formel (Spalte I) in allen Datenzeilen der Tabelle setzen,
-    # inkl. evtl. leerer Pflicht-Datenzeile.
-    for row in range(first_data_row, new_last_row + 1):
+    # Tabellengeometrie: Kopf + Datenzeilen (+ optionale Ergebniszeile).
+    # Excel verlangt mind. 1 Datenzeile → bei 0 Treffern eine leere Datenzeile;
+    # zusammen mit dem Kopf sind das die geforderten mind. 2 Zeilen.
+    n_data = max(1, len(zu_bestellen_rows))
+    data_last_row = header_row + n_data
+    new_last_row = data_last_row + totals_count
+
+    # Gesamtpreis-Formel (Spalte I) in alle Datenzeilen (ohne Ergebniszeile).
+    for row in range(first_data_row, data_last_row + 1):
         ws_zu.cell(row, gesamtpreis_col).value = gesamtpreis_formula()
-    new_ref = (
-        f"{get_column_letter(t_min_col)}{header_row}:"
-        f"{get_column_letter(t_max_col)}{new_last_row}"
-    )
-    table.ref = new_ref
+
+    # Ergebniszeile neu aufbauen (Label bzw. SUBTOTAL je Spalten-Metadaten).
+    if totals_count:
+        totals_row = new_last_row
+        for offset, tc in enumerate(table.tableColumns):
+            cell = ws_zu.cell(totals_row, t_min_col + offset)
+            if tc.totalsRowLabel:
+                cell.value = tc.totalsRowLabel
+            elif tc.totalsRowFunction and tc.totalsRowFunction in _SUBTOTAL_FUNC:
+                cell.value = f"=SUBTOTAL({_SUBTOTAL_FUNC[tc.totalsRowFunction]},{table_name}[{tc.name}])"
+            else:
+                cell.value = None
+
+    # Tabellen-Ref umfasst Kopf+Daten+Ergebnis; autoFilter nur Kopf+Daten.
+    def _ref(last_row: int) -> str:
+        return (
+            f"{get_column_letter(t_min_col)}{header_row}:"
+            f"{get_column_letter(t_max_col)}{last_row}"
+        )
+    table.ref = _ref(new_last_row)
     if table.autoFilter is not None:
-        table.autoFilter.ref = new_ref
+        table.autoFilter.ref = _ref(data_last_row)
+    table.sortState = None  # alten Sortierbereich verwerfen (sonst ungültig)
 
     print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
     for grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
