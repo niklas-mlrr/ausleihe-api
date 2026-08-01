@@ -11,7 +11,6 @@ from datetime import datetime
 
 from ausleihe.models import Book, BorrowingRule, Series, Student
 
-
 # ----------------------------------------------------------------------
 # Book
 # ----------------------------------------------------------------------

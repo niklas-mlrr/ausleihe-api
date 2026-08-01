@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iserv-ausleihe-api"
+version = "0.2.0"
+description = "Unofficial Python client for the IServ school-book lending API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Niklas"}]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = ["requests>=2.31,<3"]
+
+[project.optional-dependencies]
+bestand = ["openpyxl>=3.1,<4", "isbnlib>=3.10", "python-dotenv>=1,<2"]
+dev = ["pytest>=9,<10", "pytest-cov>=7,<8", "ruff>=0.8,<1", "mypy>=1.8,<2", "pip-audit>=2.7,<3"]
+
+[tool.setuptools.packages.find]
+include = ["ausleihe*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+extend-exclude = ["bestand- und nachbestellungen/Old - Webscraper for Excel"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["ausleihe"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
+no_implicit_optional = true

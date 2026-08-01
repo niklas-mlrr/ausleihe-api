@@ -64,6 +64,7 @@ except ImportError:
         return isbn
 
 from ausleihe import AusleiheClient, NotFoundError
+from ausleihe.inventory_excel import atomic_save_workbook, match_book
 
 
 # Excel-Anzeigeformat der "Stand"-Zelle: z.B. "Dienstag, 30.06.2026 17:25:05"
@@ -188,27 +189,6 @@ _HINT_EXPANSIONS: dict[str, str] = {
 _LEFT_BOUNDARY = r"(?<![a-zA-ZäöüÄÖÜß])"
 
 
-def match_book(books: list[dict], subject: str, hint: str | None) -> dict | None:
-    """Sucht passendes Buch nach Fach; Klammerzusatz wird case-insensitiv gesucht."""
-    candidates = [b for b in books if subject in b["subjects"]]
-    if not candidates:
-        return None
-    if hint:
-        terms = [hint]
-        expansion = _HINT_EXPANSIONS.get(hint.lower())
-        if expansion:
-            terms.append(expansion)
-        def in_title(title: str) -> bool:
-            t = title.lower()
-            return any(
-                re.search(_LEFT_BOUNDARY + re.escape(term.lower()), t)
-                for term in terms
-            )
-        narrowed = [b for b in candidates if in_title(b["title"])]
-        return narrowed[0] if narrowed else None
-    return candidates[0]
-
-
 # ── Anmelde-Zählung per Jahrgang ──────────────────────────────────────────────
 
 def fetch_enrollment_counts_by_grade(
@@ -263,26 +243,32 @@ def fetch_bestand_by_isbn(client: AusleiheClient) -> dict[str, int]:
     return {s.isbn: (s.total or 0) for s in series_list if s.isbn}
 
 
-def load_bestellt_counts(ws_bestellt) -> dict[str, int]:
+def load_bestellt_counts(ws_bestellt) -> tuple[dict[str, int], list[str]]:
     """Liest Sheet 'bestellt': Spalte F = ISBN (evtl. mit '-'), Spalte C = Stückzahl.
     Gibt pro normierter ISBN (ohne '-') die Summe aller Stückzahlen zurück.
     Zeile 1 (Kopfzeile) wird übersprungen.
     """
     counts: dict[str, int] = {}
+    errors: list[str] = []
     for row in range(2, ws_bestellt.max_row + 1):
         isbn_raw = ws_bestellt.cell(row, 6).value  # Spalte F
         count_raw = ws_bestellt.cell(row, 3).value  # Spalte C
+        if isbn_raw is None and count_raw is None:
+            continue
         if isbn_raw is None or count_raw is None:
+            errors.append(f"bestellt!{row}: ISBN und Stückzahl müssen beide gesetzt sein.")
             continue
         isbn_norm = str(isbn_raw).replace("-", "").strip()
         if not isbn_norm:
+            errors.append(f"bestellt!{row}: ISBN ist leer.")
             continue
         try:
             count = int(count_raw)
         except (ValueError, TypeError):
+            errors.append(f"bestellt!{row}: ungültige Stückzahl {count_raw!r}.")
             continue
         counts[isbn_norm] = counts.get(isbn_norm, 0) + count
-    return counts
+    return counts, errors
 
 
 # ── Hauptalgorithmus ──────────────────────────────────────────────────────────
@@ -295,6 +281,8 @@ def main() -> None:
     parser.add_argument("--schoolyear", help="Schuljahr-ID, z.B. 2025/2026")
     parser.add_argument("--excel", help="Excel-Dateiname (überschreibt config.json)")
     parser.add_argument("--sheet", help="Tabellenblatt-Name (überschreibt config.json)")
+    parser.add_argument("--safety-stock", type=int, help="Zusätzlicher Sicherheitsbestand je Titel")
+    parser.add_argument("--no-backup", action="store_true", help="Kein Wiederherstellungs-Backup anlegen")
     parser.add_argument("-v", "--verbose", action="store_true", help="Detaillierte Debug-Ausgaben")
     args = parser.parse_args()
 
@@ -315,6 +303,14 @@ def main() -> None:
         config = json.load(f)
     excel_filename = args.excel or config["excel_file"]
     sheet_name = args.sheet or config["sheet_name"]
+    safety_stock = args.safety_stock if args.safety_stock is not None else config.get("safety_stock", 5)
+    if not isinstance(safety_stock, int) or safety_stock < 0:
+        raise SystemExit("--safety-stock darf nicht negativ sein.")
+    match_overrides: dict[str, str] = config.get("match_overrides", {})
+    if not isinstance(match_overrides, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in match_overrides.items()
+    ):
+        raise SystemExit("config.json: match_overrides muss ein Objekt aus String-Schlüsseln und ISBN-Strings sein.")
     excel_path = _HERE / excel_filename
     print(f"Excel: {excel_path.name}  |  Blatt: {sheet_name}")
 
@@ -342,11 +338,15 @@ def main() -> None:
             print(f"    {k}: enrolled={v}, paid={paid_counts.get(k, 0)}, bestand={sd.get('total', 0)}")
 
     wb = load_workbook(str(excel_path))
+    if sheet_name not in wb.sheetnames:
+        raise SystemExit(f"Sheet {sheet_name!r} fehlt.")
     ws = wb[sheet_name]
 
     # "bestellt"-Sheet einlesen
+    if "bestellt" not in wb.sheetnames:
+        raise SystemExit("Sheet 'bestellt' fehlt.")
     ws_bestellt = wb["bestellt"]
-    bestellt_counts = load_bestellt_counts(ws_bestellt)
+    bestellt_counts, diagnostics = load_bestellt_counts(ws_bestellt)
     if args.verbose:
         print(f"\nbestellt-Sheet: {len(bestellt_counts)} ISBNs mit Bestellungen")
         for isbn_norm, cnt in bestellt_counts.items():
@@ -406,9 +406,8 @@ def main() -> None:
             if args.verbose:
                 a_val = ws.cell(row, 1).value
                 print(f"  Zeile {row}: other (consecutive={consecutive_other}, A={a_val!r})")
-            if consecutive_other > 3:
-                print(f"Zeile {row}: Abbruch – mehr als 3 nicht erkannte Zeilen in Folge.")
-                break
+            # Nicht abbrechen: spätere Jahrgang-Zeilen dürfen nicht still übergangen
+            # werden, nur weil zwischen zwei Blöcken Notizen stehen.
             continue
 
         # Jahrgang-Zeile
@@ -456,13 +455,17 @@ def main() -> None:
             # Fach-Label für diese Spalte bestimmen (mit Fallback auf höhere Fach-Zeilen)
             fach_val = find_fach_for_col(ws, fach_rows, col)
             if fach_val is None:
+                diagnostics.append(f"Sp.{col_letter}/Zeile {row}: kein Fach-Label für Zustand {zustand_label!r}.")
                 if args.verbose:
                     print(f"    Sp.{col_letter}: [{zustand_label}] kein Fach-Label → skip")
                 continue
 
             subject, hint = strip_hint(fach_val)
-            book = match_book(books, subject, hint)
+            override_key = f"{grade}|{subject}|{hint or ''}"
+            match = match_book(books, subject, hint, override_isbn=match_overrides.get(override_key), hint_expansions=_HINT_EXPANSIONS)
+            book = match.book
             if book is None:
+                diagnostics.append(f"Sp.{col_letter}/Zeile {row}: {match.error}")
                 if args.verbose:
                     print(f"    Sp.{col_letter}: [{zustand_label}] Fach={fach_val!r} → kein Buch-Match (subjects in Bücherliste: {[b['subjects'] for b in books]})")
                 continue
@@ -544,6 +547,12 @@ def main() -> None:
                 f"  [{subject}{hint_str} Jg.{grade}, {book['title']}, {zustand_label}]"
             )
 
+    if diagnostics:
+        print("\nABBRUCH: Excel-Struktur oder Buch-Zuordnung ist nicht eindeutig; keine Datei wird gespeichert.")
+        for diagnostic in diagnostics:
+            print(f"  - {diagnostic}")
+        raise SystemExit(2)
+
     # ── Abfragezeitpunkt in "Stand"-Zeile(n) eintragen ───────────────────────
     # In Spalte B jeder erkannten Stand-Zeile, Format TT.MM.JJJJ hh:mm:ss
     for stand_row in stand_rows:
@@ -559,6 +568,8 @@ def main() -> None:
         )
 
     # ── Sheet "zu Bestellen" befüllen ────────────────────────────────────────
+    if "zu Bestellen" not in wb.sheetnames:
+        raise SystemExit("Sheet 'zu Bestellen' fehlt.")
     ws_zu = wb["zu Bestellen"]
 
     # Tabelle dynamisch ermitteln – der Name kann sich ändern, daher nicht darauf
@@ -567,6 +578,8 @@ def main() -> None:
         raise RuntimeError("Sheet 'zu Bestellen' enthält keine Tabelle.")
     table_name = next(iter(ws_zu.tables))
     table = ws_zu.tables[table_name]
+    if len(table.tableColumns) < 8:
+        raise SystemExit("Tabelle auf 'zu Bestellen' hat nicht die erwarteten acht Eingabespalten.")
     t_min_col, header_row, t_max_col, t_old_max_row = range_boundaries(table.ref)
     totals_count = table.totalsRowCount or 0   # Ergebniszeile (eigene Zeile am Ende)
     first_data_row = header_row + 1
@@ -621,7 +634,7 @@ def main() -> None:
             grades_str = min(entry["grades"])
             fach = entry["fach"]
             zu_bestellen_rows.append(
-                (grades_str, fach, zu_bestellen + 5, title, publisher, isbn_fmt, price)
+                (grades_str, fach, zu_bestellen + safety_stock, title, publisher, isbn_fmt, price)
             )
 
     zu_bestellen_rows.sort(key=lambda r: r[3])  # alphabetisch nach Titel
@@ -680,7 +693,7 @@ def main() -> None:
 
     print(f"\n{len(zu_bestellen_rows)} Bücher mit Nachbestellbedarf:")
     for grades_str, fach, stueckzahl, title, publisher, isbn_fmt, price in zu_bestellen_rows:
-        print(f"  Jg.{grades_str:2d} [{fach}] +5 → {stueckzahl} Stk.  {title[:45]}  [{isbn_fmt}]")
+        print(f"  Jg.{grades_str:2d} [{fach}] +{safety_stock} → {stueckzahl} Stk.  {title[:45]}  [{isbn_fmt}]")
 
     # ── Ausgabe & Speichern ──────────────────────────────────────────────────
     print()
@@ -695,8 +708,11 @@ def main() -> None:
         print("Keine Änderungen.")
 
     if not args.dry_run:
-        wb.save(str(excel_path))
+        backup = None if args.no_backup else excel_path.parent / "backups"
+        backup_path = atomic_save_workbook(wb, excel_path, backup_dir=backup)
         print(f"\nGespeichert: {excel_path}")
+        if backup_path:
+            print(f"Backup: {backup_path}")
 
 
 if __name__ == "__main__":

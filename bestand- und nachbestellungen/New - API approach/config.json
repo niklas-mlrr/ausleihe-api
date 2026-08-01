@@ -1,6 +1,8 @@
 {
   "excel_file": "Bestand- und Nachbestellungsliste 2026.xlsx",
   "sheet_name": "Bestand- und Nachbestellung",
+  "safety_stock": 5,
+  "match_overrides": {},
   "mappings": [
     {
       "isbn": "9783062052224",

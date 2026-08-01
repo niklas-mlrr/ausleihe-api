@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._util import encode_path_segment
 from .models import Series
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ class SeriesAPI:
         return [Series.from_dict(d) for d in raw]
 
     def get_by_isbn(self, isbn: str) -> Series:
-        raw = self._client.get(f"/series/{isbn}")
+        raw = self._client.get(f"/series/{encode_path_segment(isbn)}")
         return Series.from_dict(raw)
 
     def get_publishers(self) -> list[str]:

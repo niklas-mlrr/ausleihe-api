@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._util import name_params
+from ._util import encode_path_segment, name_params
 from .models import Book, Student
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ class StudentAPI:
         return [Student.from_dict(d) for d in raw]
 
     def get_by_id(self, student_id: int) -> Student:
-        raw = self._client.get(f"/students/{student_id}")
+        raw = self._client.get(f"/students/{encode_path_segment(student_id)}")
         return Student.from_dict(raw)
 
     def get_detail(
@@ -65,15 +65,15 @@ class StudentAPI:
             params["books"] = "true"
         if claims:
             params["claims"] = "true"
-        return self._client.get(f"/students/{student_id}", params=params)
+        return self._client.get(f"/students/{encode_path_segment(student_id)}", params=params)
 
     def get_books(self, student_id: int) -> list[Book]:
-        raw = self._client.get(f"/students/{student_id}/books")
+        raw = self._client.get(f"/students/{encode_path_segment(student_id)}/books")
         return [Book.from_dict(d) for d in raw]
 
     def get_claims(self, student_id: int) -> list[dict]:
         """Forderungen eines Schülers. Erfordert mod_sbl_grant_always_enrollments oder Admin."""
-        return self._client.get(f"/students/{student_id}/claims")
+        return self._client.get(f"/students/{encode_path_segment(student_id)}/claims")
 
     def get_me(self) -> dict:
         """Eigenes Schüler-Profil inkl. books[], forms[], claims[], enrollments[]."""

@@ -1,5 +1,5 @@
-# Install the package + its runtime deps from setup.py (single source of truth,
-# so there's no manual mirror of `install_requires` to drift). Optional extras:
+# Install the package + its runtime deps from pyproject.toml (single source of
+# truth, so there is no manual dependency mirror to drift). Optional extras:
 #   pip install -e ".[bestand]"   # + openpyxl  (Excel-Bestands-Tooling)
 #   pip install -e ".[dev]"       # + pytest     (Tests)
 -e .

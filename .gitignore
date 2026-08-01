@@ -13,3 +13,6 @@ build/
 # Excel-Bestandslisten: Binärdateien gehören nicht ins Git (keine Diffs, Bloat).
 # Die zugehörigen Skripte + config.json bleiben versioniert.
 *.xlsx
+
+# Recoverable local copies written by the inventory commands.
+bestand- und nachbestellungen/New - API approach/backups/

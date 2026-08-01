@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Optional
 
+from ._util import encode_path_segment
 from .models import Book
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class BookAPI:
         return books
 
     def get_by_code(self, code: str) -> Book:
-        raw = self._client.get(f"/books/{code}")
+        raw = self._client.get(f"/books/{encode_path_segment(code)}")
         return Book.from_dict(raw)
 
     def filter_by_isbn(self, isbn: str, include_deleted: bool = False) -> list[Book]:

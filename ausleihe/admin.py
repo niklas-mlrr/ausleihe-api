@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from ._util import encode_schoolyear
+from ._util import encode_path_segment, encode_schoolyear
 from .models import Book
 
 if TYPE_CHECKING:
@@ -29,7 +29,9 @@ class AdminAPI:
 
     def get_booklist_pdf(self, schoolyear_id: str, booklist_id: int) -> bytes:
         sy = encode_schoolyear(schoolyear_id)
-        return self._client._get_binary(f"schoolyears/{sy}/booklists/{booklist_id}/pdf")
+        return self._client._get_binary(
+            f"schoolyears/{sy}/booklists/{encode_path_segment(booklist_id)}/pdf"
+        )
 
     # ------------------------------------------------------------------
     # Anmeldungen
@@ -69,12 +71,12 @@ class AdminAPI:
     # ------------------------------------------------------------------
 
     def get_student_id(self, code: str) -> dict:
-        return self._client.get(f"/studentids/{code}")
+        return self._client.get(f"/studentids/{encode_path_segment(code)}")
 
     def set_student_id(self, code: str, student_id: int) -> dict:
         # SCHREIBEND — wirkt auf die Produktion. Nur mit AusleiheClient(allow_writes=True).
         # Das Frontend nutzt hierfür PUT /studentids/:code (aus dem $resource-Bundle).
-        return self._client.put(f"/studentids/{code}", json={"student": student_id})
+        return self._client.put(f"/studentids/{encode_path_segment(code)}", json={"student": student_id})
 
     # ------------------------------------------------------------------
     # Finanzen
@@ -114,7 +116,7 @@ class AdminAPI:
     # ------------------------------------------------------------------
 
     def get_series_books(self, isbn: str) -> list[Book]:
-        raw = self._client.get(f"/series/{isbn}/books")
+        raw = self._client.get(f"/series/{encode_path_segment(isbn)}/books")
         return [Book.from_dict(d) for d in raw]
 
     # ------------------------------------------------------------------

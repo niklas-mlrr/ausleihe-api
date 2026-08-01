@@ -7,7 +7,7 @@ Aktualisiert die Excel-Bestands- und Nachbestellungsliste aus der IServ-Ausleihe
 
 | Pfad | Status | Verwendung |
 |------|--------|------------|
-| **`New - API approach/update_bestand_auto.py`** | ✅ **aktuell** | **Das einzige Skript, das Nachfolger brauchen.** Auto-Discovery: liest die Excel-Struktur selbst aus, braucht keine `config.json`. |
+| **`New - API approach/update_bestand_auto.py`** | ✅ **aktuell** | **Das einzige Skript, das Nachfolger brauchen.** Auto-Discovery: liest die Excel-Struktur selbst aus; `config.json` enthält nur Datei-/Blatt-Defaults, Sicherheitsbestand und explizite Konflikt-Overrides. |
 | `New - API approach/update_bestand.py` | ⚠️ veraltet | Älterer Ansatz mit manuell gepflegter `config.json` (ISBN↔Zellen-Mappings). Funktioniert noch, ist aber fehleranfällig bei neuen Buchreihen. **Nicht mehr verwenden** — `update_bestand_auto.py` ist der Ersatz. |
 | `Old - Webscraper for Excel/` | 🗑️ abgelöst | Scrapte das IServ-Frontend statt der API. **Nicht verwenden.** Nur als historischer Bezug behalten. |
 
@@ -22,6 +22,14 @@ python3 update_bestand_auto.py --dry-run --excel "Bestand- und Nachbestellungsli
 # 2) Wenn alles plausibel aussieht, wirklich ausführen:
 python3 update_bestand_auto.py --excel "Bestand- und Nachbestellungsliste 2026.xlsx"
 ```
+
+Automatische Zuordnung ist absichtlich fail-closed: Wenn ein Fach mehrere
+Bücher treffen kann oder die Tabellenstruktur unvollständig ist, wird nichts
+gespeichert. Den im Bericht genannten Schlüssel in `match_overrides` der
+`config.json` auf die gewünschte ISBN setzen und den Trockenlauf wiederholen.
+`safety_stock` (Standard: 5) ist ebenfalls dort oder über `--safety-stock`
+konfigurierbar. Erfolgreiche Läufe erstellen standardmäßig eine zeitgestempelte
+Kopie im Unterordner `backups/`; nur bei bewusstem Risiko `--no-backup` nutzen.
 
 Voraussetzungen: installiertes `ausleihe-api` (siehe übergeordnetes Repo), `.env`
 mit IServ-Zugangsdaten im `ausleihe-api`-Root, sowie `openpyxl` + `isbnlib`

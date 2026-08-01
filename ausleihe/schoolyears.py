@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._util import encode_path_segment
 from ._util import encode_schoolyear as _enc
 
 if TYPE_CHECKING:
@@ -29,5 +30,5 @@ class SchoolyearsAPI:
     def get_booklist(self, schoolyear_id: str, booklist_id: int) -> dict:
         """Einzelne Bücherliste mit sections[]->options[]->items[]. ID z.B. '2025/2026'."""
         return self._client.get(
-            f"/schoolyears/{_enc(schoolyear_id)}/booklists/{booklist_id}"
+            f"/schoolyears/{_enc(schoolyear_id)}/booklists/{encode_path_segment(booklist_id)}"
         )

@@ -27,6 +27,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from ausleihe import AusleiheClient, NotFoundError
+from ausleihe.inventory_excel import atomic_save_workbook
 
 
 def resolve_anchor(ws, cell_ref: str) -> str:
@@ -86,8 +87,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bestand- und Angemeldet-Zellen in Excel aktualisieren")
     parser.add_argument("--dry-run", action="store_true", help="Keine Änderungen speichern")
     parser.add_argument("--schoolyear", help="Schuljahr-ID, z.B. 2025/2026 (Default: aktuelles)")
+    parser.add_argument("--allow-partial", action="store_true", help="Trotz nicht erreichbarer Serien speichern (nicht empfohlen)")
+    parser.add_argument("--no-backup", action="store_true", help="Kein Wiederherstellungs-Backup anlegen")
     args = parser.parse_args()
 
+    print("WARNUNG: update_bestand.py ist veraltet. Bitte update_bestand_auto.py verwenden.", file=sys.stderr)
     config = load_config()
     excel_path = _HERE / config["excel_file"]
     mappings: list[dict] = config["mappings"]
@@ -102,6 +106,7 @@ def main() -> None:
 
     series_total: dict[str, int] = {}
     series_title: dict[str, str] = {}
+    retrieval_errors: list[str] = []
     for isbn in sorted(unique_isbns):
         try:
             s = client.series.get_by_isbn(isbn)
@@ -114,6 +119,10 @@ def main() -> None:
             print(f"  WARNUNG: {isbn} — nicht gefunden (abgelöste Serie?)")
         except Exception as e:
             print(f"  FEHLER:   {isbn} — {e}")
+            retrieval_errors.append(f"{isbn}: {e}")
+
+    if retrieval_errors and not args.allow_partial:
+        raise SystemExit("API-Abruf unvollständig; keine Excel-Datei wird verändert. --allow-partial nur bewusst verwenden.")
 
     wb = load_workbook(str(excel_path))
     ws = wb[config["sheet_name"]]
@@ -162,6 +171,11 @@ def main() -> None:
             enrollment_counts = fetch_enrollment_counts(client, schoolyear_id)
         except Exception as e:
             print(f"FEHLER beim Laden der Anmeldungen: {e}")
+            if not args.allow_partial:
+                raise SystemExit(
+                    "Anmeldungen konnten nicht vollständig geladen werden; keine Excel-Datei wird verändert. "
+                    "--allow-partial nur bewusst verwenden."
+                ) from e
             enrollment_counts = None
 
         if enrollment_counts is not None:
@@ -202,7 +216,11 @@ def main() -> None:
     # Einmal speichern, nachdem alle Zellen (Bestand + Angemeldet) gesetzt wurden.
     if changed or a_changed:
         if not args.dry_run:
-            wb.save(str(excel_path))
+            backup = None if args.no_backup else excel_path.parent / "backups"
+            backup_path = atomic_save_workbook(wb, excel_path, backup_dir=backup)
+            print(f"Gespeichert: {excel_path}")
+            if backup_path:
+                print(f"Backup: {backup_path}")
 
 
 if __name__ == "__main__":
