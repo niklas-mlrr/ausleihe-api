@@ -2,7 +2,7 @@
 
 Inoffizieller Python-Wrapper für die IServ Schulbuchausleihe REST API
 (reverse-engineered). Vollständige Doku im Wiki:
-`~/cc/wiki/30_projects/sba/ausleihe_api/` (overview, auth, api_reference, schemas,
+`~/wiki/wiki/30_projects/sba/ausleihe_api/` (overview, auth, api_reference, schemas,
 write_endpoints).
 
 ## ⚠️ PRODUKTIONS-SCHUTZ — UNBEDINGT BEACHTEN
