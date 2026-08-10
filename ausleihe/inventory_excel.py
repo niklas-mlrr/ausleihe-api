@@ -92,7 +92,9 @@ def atomic_save_workbook(
     try:
         os.close(fd)
         workbook.save(tmp_name)
-        with open(tmp_name, "rb") as handle:
+        # r+b (not rb): os.fsync() needs a handle opened for writing, or it
+        # raises OSError: [Errno 9] Bad file descriptor on Windows.
+        with open(tmp_name, "r+b") as handle:
             os.fsync(handle.fileno())
         shutil.copymode(destination, tmp_name)
         os.replace(tmp_name, destination)
