@@ -19,7 +19,10 @@ Algorithmus:
     - "Bestellt": Summe aus Sheet "bestellt" Spalte C für alle Zeilen wo Spalte F (ISBN, "-" ignoriert) passt;
       None wenn ISBN dort nicht vorkommt
   - Bereits bearbeitete Ankerzellen überspringen (Mehrjahresbände / Zellenverbünde)
-  - Abbruch nach mehr als 3 nicht identifizierbaren Zeilen in Folge
+  - Gibt es für Fach+Jahrgang kein Buch in der Bücherliste (z.B. Fach in diesem
+    Jahrgang nicht angeboten) → Spalte überspringen, kein Abbruch. Mehrdeutige
+    Treffer (mehrere Bücher passen) brechen weiterhin ab, da hier ein
+    match_overrides-Eintrag in config.json nötig ist.
   - Am Ende: Sheet "zu Bestellen" ab Zeile 2 leeren und mit Büchern befüllen,
     bei denen (Angemeldet - Bestand - Bestellt) > 0 ist.
 
@@ -369,6 +372,7 @@ def main() -> None:
     processed_enrollment: set[tuple[int, str, str]] = set()  # Angemeldet/Bezahlt: je (grade, isbn, zustand)
     consecutive_other = 0
     changes: list[str] = []
+    skipped: list[str] = []   # Fach/Jahrgang-Kombinationen ohne Buch in der Bücherliste
 
     # Sammelt pro ISBN die geschriebenen Werte für die "zu Bestellen"-Ausgabe.
     # isbn → {"angemeldet": int, "bestand": int, "bestellt": int|None,
@@ -465,9 +469,17 @@ def main() -> None:
             match = match_book(books, subject, hint, override_isbn=match_overrides.get(override_key), hint_expansions=_HINT_EXPANSIONS)
             book = match.book
             if book is None:
-                diagnostics.append(f"Sp.{col_letter}/Zeile {row}: {match.error}")
-                if args.verbose:
-                    print(f"    Sp.{col_letter}: [{zustand_label}] Fach={fach_val!r} → kein Buch-Match (subjects in Bücherliste: {[b['subjects'] for b in books]})")
+                if match.error and match.error.startswith("Kein Buch-Match"):
+                    # Kein Buch für dieses Fach in der Bücherliste dieses Jahrgangs
+                    # (z.B. Fach wird in diesem Jahrgang nicht angeboten) → normal,
+                    # kein Abbruch nötig.
+                    skipped.append(f"Sp.{col_letter}/Zeile {row}: {match.error}")
+                    if args.verbose:
+                        print(f"    Sp.{col_letter}: [{zustand_label}] Fach={fach_val!r} → kein Buch-Match, übersprungen (subjects in Bücherliste: {[b['subjects'] for b in books]})")
+                else:
+                    diagnostics.append(f"Sp.{col_letter}/Zeile {row}: {match.error}")
+                    if args.verbose:
+                        print(f"    Sp.{col_letter}: [{zustand_label}] Fach={fach_val!r} → {match.error}")
                 continue
 
             # Ankerzelle der Jahrgang-Zeile bestimmen (Zellenverbund-Auflösung)
@@ -546,6 +558,11 @@ def main() -> None:
                 f"  {anchor_ref}: {old_val!r} -> {new_val!r}"
                 f"  [{subject}{hint_str} Jg.{grade}, {book['title']}, {zustand_label}]"
             )
+
+    if skipped:
+        print(f"\n{len(skipped)} Fach/Jahrgang-Kombination(en) ohne Buch übersprungen:")
+        for s in skipped:
+            print(f"  - {s}")
 
     if diagnostics:
         print("\nABBRUCH: Excel-Struktur oder Buch-Zuordnung ist nicht eindeutig; keine Datei wird gespeichert.")
