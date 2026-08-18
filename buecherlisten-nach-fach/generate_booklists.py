@@ -3,11 +3,13 @@
 
 Holt alle Bücherlisten (eine je Jahrgang) eines Schuljahrs über die
 IServ-Ausleihe-API und stellt sie fachweise neu zusammen: pro Fach eine
-Tabelle "Leihbare Bücher" und eine Tabelle "Selbst anzuschaffende Bücher"
-(Spalten: Klasse, Titel, Verlag, ISBN, Neupreis, Leihgebühr). Bücher, die in
-mehreren Jahrgängen angeboten werden (Mehrjahresbände), erscheinen einmal pro
-Fach mit allen betroffenen Klassen (z.B. "5/6") und werden zuerst nach der
-untersten, dann nach der zweituntersten Klasse einsortiert.
+Tabelle "Leihbare Bücher" (Spalten Klasse, Titel, Verlag, ISBN, Neupreis,
+Leihgebühr) und eine Tabelle "Selbst anzuschaffende Bücher" (dieselben Spalten
+ohne Leihgebühr — genau wie in den offiziellen IServ-Bücherlisten-PDFs, an
+deren Aufmachung sich dieses Layout orientiert). Bücher, die in mehreren
+Jahrgängen angeboten werden (Mehrjahresbände), erscheinen einmal pro Fach mit
+allen betroffenen Klassen (z.B. "5, 6") und werden zuerst nach der untersten,
+dann nach der zweituntersten Klasse einsortiert.
 
 Es gibt für diesen Anwendungsfall keinen eigenen API-Endpunkt — die Zusammen-
 stellung passiert clientseitig aus den regulären Bücherlisten-Daten
@@ -34,9 +36,9 @@ Verwendung:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 _HERE = Path(__file__).parent
@@ -66,10 +68,11 @@ except ImportError:  # pragma: no cover
 
 
 from reportlab.lib import colors  # noqa: E402
-from reportlab.lib.enums import TA_LEFT  # noqa: E402
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT  # noqa: E402
 from reportlab.lib.pagesizes import A4  # noqa: E402
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # noqa: E402
 from reportlab.lib.units import mm  # noqa: E402
+from reportlab.pdfgen.canvas import Canvas  # noqa: E402
 from reportlab.platypus import (  # noqa: E402
     PageBreak,
     Paragraph,
@@ -79,20 +82,44 @@ from reportlab.platypus import (  # noqa: E402
     TableStyle,
 )
 
-TABLE_COLS = ["Klasse", "Titel", "Verlag", "ISBN", "Neupreis", "Leihgebühr"]
-COL_WIDTHS = [16 * mm, 62 * mm, 32 * mm, 30 * mm, 22 * mm, 24 * mm]
+# Schulname für die Fußzeile — an der Aufmachung der offiziellen IServ-
+# Bücherlisten-PDFs orientiert (dort im Footer geführt).
+SCHOOL_NAME = "Tilman-Riemenschneider-Gymnasium Osterode am Harz"
+
+ACCENT_COLOR = colors.HexColor("#B5541A")
+RULE_COLOR = colors.HexColor("#333333")
+GREY = colors.HexColor("#666666")
+
+LEIH_COLS = ["Klasse", "Titel", "Verlag", "ISBN", "Neupreis", "Leihgebühr"]
+LEIH_WIDTHS = [18 * mm, 58 * mm, 30 * mm, 32 * mm, 21 * mm, 21 * mm]
+KAUF_COLS = ["Klasse", "Titel", "Verlag", "ISBN", "Neupreis"]
+KAUF_WIDTHS = [18 * mm, 79 * mm, 30 * mm, 32 * mm, 21 * mm]
 
 STYLES = getSampleStyleSheet()
+INFO_LABEL_STYLE = ParagraphStyle("InfoLabel", parent=STYLES["Normal"], fontSize=8, textColor=GREY)
+INFO_VALUE_STYLE = ParagraphStyle(
+    "InfoValue", parent=STYLES["Normal"], fontSize=10.5, fontName="Helvetica-Bold", spaceBefore=1
+)
+INFO_VALUE_RIGHT_STYLE = ParagraphStyle("InfoValueRight", parent=INFO_VALUE_STYLE, alignment=TA_RIGHT)
+INFO_LABEL_RIGHT_STYLE = ParagraphStyle("InfoLabelRight", parent=INFO_LABEL_STYLE, alignment=TA_RIGHT)
 TITLE_STYLE = ParagraphStyle(
-    "FachTitel", parent=STYLES["Heading1"], fontSize=16, spaceAfter=2 * mm, alignment=TA_LEFT
+    "FachTitel", parent=STYLES["Heading1"], fontSize=20, spaceBefore=4 * mm, spaceAfter=4 * mm,
+    alignment=TA_LEFT, textColor=colors.black,
 )
-SUBTITLE_STYLE = ParagraphStyle(
-    "Schuljahr", parent=STYLES["Normal"], fontSize=10, textColor=colors.grey, spaceAfter=6 * mm
-)
+INTRO_STYLE = ParagraphStyle("Intro", parent=STYLES["Normal"], fontSize=9.5, spaceAfter=5 * mm, leading=13)
 SECTION_STYLE = ParagraphStyle(
-    "Abschnitt", parent=STYLES["Heading2"], fontSize=12, spaceBefore=4 * mm, spaceAfter=2 * mm
+    "Abschnitt", parent=STYLES["Heading2"], fontSize=13, textColor=ACCENT_COLOR,
+    spaceBefore=6 * mm, spaceAfter=2 * mm,
 )
-EMPTY_STYLE = ParagraphStyle("Leer", parent=STYLES["Normal"], fontSize=9, textColor=colors.grey)
+EMPTY_STYLE = ParagraphStyle("Leer", parent=STYLES["Normal"], fontSize=9, textColor=GREY)
+
+CELL_STYLE = ParagraphStyle("Zelle", parent=STYLES["Normal"], fontSize=8.5, leading=10.5)
+CELL_CENTER_STYLE = ParagraphStyle("ZelleZentriert", parent=CELL_STYLE, alignment=1)  # TA_CENTER
+CELL_RIGHT_STYLE = ParagraphStyle("ZelleRechts", parent=CELL_STYLE, alignment=TA_RIGHT)
+HEADER_CELL_STYLE = ParagraphStyle(
+    "KopfZelle", parent=CELL_STYLE, fontName="Helvetica-Bold", fontSize=8.5
+)
+HEADER_CELL_RIGHT_STYLE = ParagraphStyle("KopfZelleRechts", parent=HEADER_CELL_STYLE, alignment=TA_RIGHT)
 
 
 def fmt_price(value: float | None) -> str:
@@ -108,7 +135,9 @@ def fmt_price(value: float | None) -> str:
 
 
 def fmt_grades(grades: tuple[int, ...]) -> str:
-    return "/".join(str(g) for g in grades)
+    # Komma + Leerzeichen statt "/": erlaubt Zeilenumbruch in der schmalen
+    # Klasse-Spalte, wenn ein Mehrjahresband viele Klassen abdeckt.
+    return ", ".join(str(g) for g in grades)
 
 
 def collect_entries(client: AusleiheClient, schoolyear_id: str) -> dict[tuple[str, str], dict]:
@@ -175,27 +204,63 @@ def build_subject_tables(entries: dict[tuple[str, str], dict]) -> dict[str, dict
     return by_subject
 
 
-def render_table(rows: list[dict]) -> Table:
-    data = [TABLE_COLS] + [
-        [r["klasse"], r["titel"], r["verlag"], r["isbn"], r["neupreis"], r["leihgebuehr"]] for r in rows
+def _cell(text: str, style: ParagraphStyle) -> Paragraph:
+    # Paragraph statt Klartext: reportlabs Table bricht reine Strings nur an
+    # Leerzeichen um, lange Titel/Verlage liefen dadurch in die Nachbarspalte
+    # (beobachtet 2026-08-18). Paragraph erzwingt sauberen Zeilenumbruch.
+    return Paragraph(text, style)
+
+
+def render_table(rows: list[dict], *, with_fee: bool) -> Table:
+    cols, widths = (LEIH_COLS, LEIH_WIDTHS) if with_fee else (KAUF_COLS, KAUF_WIDTHS)
+    header = [_cell(cols[0], HEADER_CELL_STYLE)] + [_cell(c, HEADER_CELL_STYLE) for c in cols[1:-1]]
+    header.append(_cell(cols[-1], HEADER_CELL_RIGHT_STYLE))
+    data = [header]
+    for r in rows:
+        line = [
+            _cell(r["klasse"], CELL_CENTER_STYLE),
+            _cell(r["titel"], CELL_STYLE),
+            _cell(r["verlag"], CELL_STYLE),
+            _cell(r["isbn"], CELL_STYLE),
+        ]
+        if with_fee:
+            line.append(_cell(r["neupreis"], CELL_RIGHT_STYLE))
+            line.append(_cell(r["leihgebuehr"], CELL_RIGHT_STYLE))
+        else:
+            line.append(_cell(r["neupreis"], CELL_RIGHT_STYLE))
+        data.append(line)
+
+    # Schlankes, an die offiziellen IServ-Bücherlisten angelehntes Layout:
+    # keine Füllfarben/Gitternetz, nur eine dünne Linie unter der Kopfzeile.
+    style = [
+        ("LINEBELOW", (0, 0), (-1, 0), 0.75, RULE_COLOR),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
     ]
-    table = Table(data, colWidths=COL_WIDTHS, repeatRows=1)
+    table = Table(data, colWidths=widths, repeatRows=1)
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def info_header(schoolyear_id: str, subject: str) -> Table:
+    left = [Paragraph("Liste für", INFO_LABEL_STYLE), Paragraph(f"Schuljahr {schoolyear_id}", INFO_VALUE_STYLE)]
+    right = [
+        Paragraph("gültig für", INFO_LABEL_RIGHT_STYLE),
+        Paragraph(f"Fach {subject}", INFO_VALUE_RIGHT_STYLE),
+    ]
+    table = Table([[left, right]], colWidths=[90 * mm, 90 * mm])
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2f3e46")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f2f2")]),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                ("ALIGN", (4, 0), (5, -1), "RIGHT"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
             ]
         )
     )
@@ -204,36 +269,60 @@ def render_table(rows: list[dict]) -> Table:
 
 def subject_story(subject: str, tables: dict[str, list[dict]], schoolyear_id: str) -> list:
     story: list = [
-        Paragraph(subject, TITLE_STYLE),
-        Paragraph(f"Bücherliste – Schuljahr {schoolyear_id}", SUBTITLE_STYLE),
+        info_header(schoolyear_id, subject),
+        Paragraph(f"Bücherliste {subject}", TITLE_STYLE),
+        Paragraph(
+            f"Die folgenden Bücher können für das Fach {subject} über die Schule ausgeliehen werden. "
+            "Bücher, die selbst anzuschaffen sind, werden gesondert in der zweiten Tabelle ausgewiesen.",
+            INTRO_STYLE,
+        ),
     ]
 
     story.append(Paragraph("Leihbare Bücher", SECTION_STYLE))
     if tables["leih"]:
-        story.append(render_table(tables["leih"]))
+        story.append(render_table(tables["leih"], with_fee=True))
     else:
         story.append(Paragraph("Keine leihbaren Bücher in diesem Fach.", EMPTY_STYLE))
 
     story.append(Paragraph("Selbst anzuschaffende Bücher", SECTION_STYLE))
     if tables["kauf"]:
-        story.append(render_table(tables["kauf"]))
+        story.append(render_table(tables["kauf"], with_fee=False))
     else:
         story.append(Paragraph("Keine selbst anzuschaffenden Bücher in diesem Fach.", EMPTY_STYLE))
 
     return story
 
 
-def write_pdf(path: Path, story: list, title: str) -> None:
+def make_footer(center_text: str):
+    """onPage-Callback: Fußzeile ähnlich den offiziellen IServ-PDFs
+    (Erstellungsdatum links, Seitenzahl rechts, Schule+Kontext mittig)."""
+    generated = datetime.now().strftime("%d.%m.%Y")
+
+    def _draw(c: Canvas, doc: SimpleDocTemplate) -> None:
+        width, _height = A4
+        c.saveState()
+        c.setFont("Helvetica", 7.5)
+        c.setFillColor(GREY)
+        c.drawString(15 * mm, 10 * mm, f"Erstellt am {generated}")
+        c.drawRightString(width - 15 * mm, 10 * mm, f"Seite {doc.page}")
+        c.drawCentredString(width / 2, 10 * mm, center_text)
+        c.restoreState()
+
+    return _draw
+
+
+def write_pdf(path: Path, story: list, title: str, footer_center: str) -> None:
     doc = SimpleDocTemplate(
         str(path),
         pagesize=A4,
         leftMargin=15 * mm,
         rightMargin=15 * mm,
         topMargin=15 * mm,
-        bottomMargin=15 * mm,
+        bottomMargin=18 * mm,
         title=title,
     )
-    doc.build(story)
+    footer = make_footer(footer_center)
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
 def sanitize_filename(name: str) -> str:
@@ -276,13 +365,15 @@ def main() -> None:
                 story.append(PageBreak())
             story.extend(subject_story(subject, by_subject[subject], schoolyear_id))
         out_path = out_dir / f"Bücherliste Fächer {sy_label}.pdf"
-        write_pdf(out_path, story, title=f"Bücherliste Fächer {schoolyear_id}")
+        footer_center = f"{SCHOOL_NAME} – Bücherliste Fächer (Schuljahr {schoolyear_id})"
+        write_pdf(out_path, story, title=f"Bücherliste Fächer {schoolyear_id}", footer_center=footer_center)
         print(f"PDF gespeichert: {out_path}")
     else:
         for subject in subjects:
             story = subject_story(subject, by_subject[subject], schoolyear_id)
             out_path = out_dir / f"Bücherliste {subject} {sy_label}.pdf"
-            write_pdf(out_path, story, title=f"Bücherliste {subject} {schoolyear_id}")
+            footer_center = f"{SCHOOL_NAME} – Bücherliste {subject} (Schuljahr {schoolyear_id})"
+            write_pdf(out_path, story, title=f"Bücherliste {subject} {schoolyear_id}", footer_center=footer_center)
             print(f"PDF gespeichert: {out_path}")
 
 
