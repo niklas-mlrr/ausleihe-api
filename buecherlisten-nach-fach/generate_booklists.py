@@ -156,10 +156,12 @@ SPLIT_SEARCH_STEP = 1.0
 # Abstand aneinanderstoßen (beobachtet 2026-08-18, "Klasse"-Wert direkt vor
 # dem Titel).
 MIN_GAP = 14.0
+# Abstand einer Tabellenzeile zur Trennlinie darüber/darunter (Original: 4pt).
+CELL_VPAD = 2.0
 # Siehe TOPPADDING/BOTTOMPADDING in render_table.
-VPAD_SHIFT = 1.0
+VPAD_SHIFT = 0.66
 # Siehe ISBN-TOPPADDING in render_table.
-ISBN_VSHIFT = 1.4
+ISBN_VSHIFT = 1.278
 
 STYLES = getSampleStyleSheet()
 INTRO_STYLE = ParagraphStyle(
@@ -515,23 +517,38 @@ def render_table(rows: list[dict], *, with_fee: bool) -> Table:
         ("ALIGN", (neupreis_idx, 1), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, 0), 1.0, RULE_COLOR),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        # TOPPADDING/BOTTOMPADDING sind bewusst NICHT symmetrisch (4/4): reportlab
-        # legt bei TOP-VALIGN mehr Leerraum über der Textzeile an als darunter
-        # (Zeilenabstand vs. tatsächliche Schrifthöhe), gemessen 2026-08-19 mit
-        # pdfplumber als ~1.7pt zu viel oben / zu wenig unten. Der Versatz
-        # VPAD_SHIFT gleicht das aus, damit der Abstand einer Textzeile zur
-        # Trennlinie darüber und darunter gleich groß ist — reine Y-Position,
+        # Reportlab nimmt für Klartext-Zellen (Klasse/ISBN/Neupreis/Leihgebühr)
+        # standardmäßig eine andere Zeilenhöhe an (fontSize*1.2) als für die
+        # Paragraph-Zellen Titel/Verlag (CELL_STYLE.leading=11.5) — das ergab
+        # bei einzeiligen Zeilen eine andere Zeilenhöhe als bei umbrochenen und
+        # dadurch einen row-abhängigen Rest-Versatz. LEADING gleicht das an.
+        ("LEADING", (0, 0), (-1, -1), CELL_STYLE.leading),
+        # TOPPADDING/BOTTOMPADDING sind bewusst NICHT symmetrisch: reportlab
+        # reserviert bei TOP-VALIGN über der Textzeile die volle Oberlänge und
+        # darunter die volle Unterlänge. Optisch maßgeblich ist aber die
+        # Versalhöhe oben (Oberkante Großbuchstabe) und die Grundlinie unten
+        # (Unterkante ohne g/p/q/Komma) — dazwischen sitzt der Text sonst zu
+        # hoch. VPAD_SHIFT verschiebt ihn so weit nach unten, dass der Abstand
+        # Versalhöhe→Linie darüber und Grundlinie→Linie darunter gleich groß
+        # ist (kalibriert 2026-08-19: gemessen wurde die Grundlinie aus der
+        # Text-Matrix des PDFs plus Helvetica-CapHeight 718/1000 — pdfplumbers
+        # char-Bounding-Box taugt dafür nicht, sie ist für JEDES Zeichen exakt
+        # 1 em hoch, egal ob "D" oder "g"). Summe TOP+BOTTOM bleibt 2*CELL_VPAD,
+        # die Zeilenhöhe ändert sich also nicht. Reine Y-Position —
         # Schriftgröße/-farbe bleiben unverändert.
-        ("TOPPADDING", (0, 0), (-1, -1), 4 - VPAD_SHIFT),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4 + VPAD_SHIFT),
+        ("TOPPADDING", (0, 0), (-1, -1), CELL_VPAD - VPAD_SHIFT),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), CELL_VPAD + VPAD_SHIFT),
         # ISBN ist mit 8pt kleiner als der restliche 10pt-Zeilentext (siehe
-        # ISBN_FONT_SIZE) — bei gleichem TOPPADDING sitzt ihr optisches
-        # Zentrum dadurch höher als das der anderen Spalten in derselben
-        # Zeile. ISBN_VSHIFT schiebt nur die ISBN-Spalte zusätzlich nach
-        # unten, bis ihr Zentrum mit dem der 10pt-Spalten übereinstimmt
-        # (gemessen 2026-08-19 mit pdfplumber). Reine Y-Position, Schriftgröße
-        # bleibt 8pt.
-        ("TOPPADDING", (isbn_idx, 1), (isbn_idx, -1), 4 - VPAD_SHIFT + ISBN_VSHIFT),
+        # ISBN_FONT_SIZE) und hat damit eine kleinere Versalhöhe. Damit ihr
+        # Versalhöhe/Grundlinie-Kasten auf derselben Mitte sitzt wie der der
+        # 10pt-Spalten, muss ihre Grundlinie um die halbe Versalhöhen-Differenz
+        # höher liegen — ISBN_VSHIFT stellt genau das ein. Reine Y-Position,
+        # Schriftgröße bleibt 8pt.
+        # ISBN_VSHIFT wird der ISBN-Spalte oben aufgeschlagen und unten wieder
+        # abgezogen — die Zellenhöhe (und damit ggf. die Zeilenhöhe bei
+        # einzeiligen Zeilen) bleibt dadurch identisch zu den anderen Spalten.
+        ("TOPPADDING", (isbn_idx, 1), (isbn_idx, -1), CELL_VPAD - VPAD_SHIFT + ISBN_VSHIFT),
+        ("BOTTOMPADDING", (isbn_idx, 1), (isbn_idx, -1), CELL_VPAD + VPAD_SHIFT - ISBN_VSHIFT),
         # Gleicher Abstand zwischen allen Spalten: jede Innenkante bekommt die
         # halbe Lücke, außen (erste/letzte Spalte) bleibt 0 — Tabelle fluchtet
         # weiterhin links mit "Liste für"/Überschrift, rechts mit "gültig für".
