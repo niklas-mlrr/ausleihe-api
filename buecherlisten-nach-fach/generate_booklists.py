@@ -31,15 +31,21 @@ Rein lesend (nur GET). Kein Schreibzugriff auf die IServ-Produktionsdatenbank.
 
 Verwendung:
   python3 generate_booklists.py [--schoulyear 2026/2027] [--mode combined|split]
+                                 [--subjects "Fach1" "Fach2" ...] [--list-subjects]
                                  [--output-dir PFAD]
 
-  --schoolyear   Schuljahr wie "2026/2027" (Default: laufendes Schuljahr)
-  --mode         combined = eine PDF-Datei mit einer neuen Seite pro Fach,
-                            benannt "Bücherliste Fächer <Schuljahr>.pdf"
-                 split    = eine PDF-Datei pro Fach,
-                            benannt "Bücherliste <Fach> <Schuljahr>.pdf"
-                 (Default: combined)
-  --output-dir   Zielordner für die PDF(s) (Default: dieser Skriptordner)
+  --schoolyear     Schuljahr wie "2026/2027" (Default: laufendes Schuljahr)
+  --mode           combined = eine PDF-Datei mit einer neuen Seite pro Fach,
+                              benannt "Bücherliste Fächer <Schuljahr>.pdf"
+                   split    = eine PDF-Datei pro Fach,
+                              benannt "Bücherliste <Fach> <Schuljahr>.pdf"
+                   (Default: combined)
+  --subjects       Nur diese Fächer aufnehmen (ein oder mehrere Namen, exakt
+                    wie in der Bücherliste, z.B. --subjects Deutsch Mathematik).
+                    Default: alle Fächer, die im Schuljahr vorkommen.
+  --list-subjects  Nur die verfügbaren Fächer des Schuljahrs auflisten und
+                    beenden (keine PDF-Erzeugung).
+  --output-dir     Zielordner für die PDF(s) (Default: dieser Skriptordner)
 """
 from __future__ import annotations
 
@@ -659,6 +665,14 @@ def main() -> None:
         "--mode", choices=["combined", "split"], default="combined",
         help="combined = 1 PDF mit Seite pro Fach, split = 1 PDF je Fach (Default: combined)",
     )
+    parser.add_argument(
+        "--subjects", nargs="+", default=None, metavar="FACH",
+        help="Nur diese Fächer aufnehmen (Default: alle vorhandenen Fächer)",
+    )
+    parser.add_argument(
+        "--list-subjects", action="store_true",
+        help="Nur die verfügbaren Fächer auflisten und beenden",
+    )
     parser.add_argument("--output-dir", default=None, help="Zielordner (Default: dieser Skriptordner)")
     args = parser.parse_args()
 
@@ -676,6 +690,27 @@ def main() -> None:
     if not subjects:
         print(f"Keine Bücher für Schuljahr {schoolyear_id} gefunden.", file=sys.stderr)
         sys.exit(1)
+
+    if args.list_subjects:
+        for subject in subjects:
+            print(subject)
+        return
+
+    if args.subjects:
+        by_casefold = {s.casefold(): s for s in subjects}
+        selected: list[str] = []
+        unknown: list[str] = []
+        for wanted in args.subjects:
+            match = by_casefold.get(wanted.casefold())
+            if match is None:
+                unknown.append(wanted)
+            elif match not in selected:
+                selected.append(match)
+        if unknown:
+            print(f"Fehler: Unbekannte Fächer für Schuljahr {schoolyear_id}: {', '.join(unknown)}", file=sys.stderr)
+            print(f"Verfügbare Fächer: {', '.join(subjects)}", file=sys.stderr)
+            sys.exit(1)
+        subjects = sorted(selected, key=str.casefold)
 
     out_dir = Path(args.output_dir) if args.output_dir else _HERE
     out_dir.mkdir(parents=True, exist_ok=True)
