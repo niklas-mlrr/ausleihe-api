@@ -156,6 +156,10 @@ SPLIT_SEARCH_STEP = 1.0
 # Abstand aneinanderstoßen (beobachtet 2026-08-18, "Klasse"-Wert direkt vor
 # dem Titel).
 MIN_GAP = 14.0
+# Siehe TOPPADDING/BOTTOMPADDING in render_table.
+VPAD_SHIFT = 1.0
+# Siehe ISBN-TOPPADDING in render_table.
+ISBN_VSHIFT = 1.4
 
 STYLES = getSampleStyleSheet()
 INTRO_STYLE = ParagraphStyle(
@@ -511,8 +515,23 @@ def render_table(rows: list[dict], *, with_fee: bool) -> Table:
         ("ALIGN", (neupreis_idx, 1), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, 0), 1.0, RULE_COLOR),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        # TOPPADDING/BOTTOMPADDING sind bewusst NICHT symmetrisch (4/4): reportlab
+        # legt bei TOP-VALIGN mehr Leerraum über der Textzeile an als darunter
+        # (Zeilenabstand vs. tatsächliche Schrifthöhe), gemessen 2026-08-19 mit
+        # pdfplumber als ~1.7pt zu viel oben / zu wenig unten. Der Versatz
+        # VPAD_SHIFT gleicht das aus, damit der Abstand einer Textzeile zur
+        # Trennlinie darüber und darunter gleich groß ist — reine Y-Position,
+        # Schriftgröße/-farbe bleiben unverändert.
+        ("TOPPADDING", (0, 0), (-1, -1), 4 - VPAD_SHIFT),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4 + VPAD_SHIFT),
+        # ISBN ist mit 8pt kleiner als der restliche 10pt-Zeilentext (siehe
+        # ISBN_FONT_SIZE) — bei gleichem TOPPADDING sitzt ihr optisches
+        # Zentrum dadurch höher als das der anderen Spalten in derselben
+        # Zeile. ISBN_VSHIFT schiebt nur die ISBN-Spalte zusätzlich nach
+        # unten, bis ihr Zentrum mit dem der 10pt-Spalten übereinstimmt
+        # (gemessen 2026-08-19 mit pdfplumber). Reine Y-Position, Schriftgröße
+        # bleibt 8pt.
+        ("TOPPADDING", (isbn_idx, 1), (isbn_idx, -1), 4 - VPAD_SHIFT + ISBN_VSHIFT),
         # Gleicher Abstand zwischen allen Spalten: jede Innenkante bekommt die
         # halbe Lücke, außen (erste/letzte Spalte) bleibt 0 — Tabelle fluchtet
         # weiterhin links mit "Liste für"/Überschrift, rechts mit "gültig für".
