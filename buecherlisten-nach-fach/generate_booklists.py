@@ -32,7 +32,7 @@ Rein lesend (nur GET). Kein Schreibzugriff auf die IServ-Produktionsdatenbank.
 Verwendung:
   python3 generate_booklists.py [--schoulyear 2026/2027] [--mode combined|split]
                                  [--subjects "Fach1" "Fach2" ...] [--list-subjects]
-                                 [--output-dir PFAD]
+                                 [--output-dir PFAD] [--confirmation]
 
   --schoolyear     Schuljahr wie "2026/2027" (Default: laufendes Schuljahr)
   --mode           combined = eine PDF-Datei mit einer neuen Seite pro Fach,
@@ -46,14 +46,26 @@ Verwendung:
   --list-subjects  Nur die verfügbaren Fächer des Schuljahrs auflisten und
                     beenden (keine PDF-Erzeugung).
   --output-dir     Zielordner für die PDF(s) (Default: dieser Skriptordner)
+  --confirmation   Bestätigungs-Block (Ankreuzfelder + Ort/Datum/Unterschrift
+                    Fachkonferenzleitung <Fach>) am Ende jeder Fach-Liste
+                    ergänzen. Lädt zusätzlich live die Fach->Name-Zuordnung
+                    von der TRG-Website (Fachkonferenzleitungen) und zeigt den
+                    Namen mittig in der Kopfzeile; schlägt der Abruf fehl oder
+                    ist das Fach dort nicht gelistet, steht dort ersatzweise
+                    "Bestätigung".
 """
 from __future__ import annotations
 
 import argparse
+import difflib
+import html
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+
+import requests
 
 _HERE = Path(__file__).parent
 _ROOT = _HERE.parent
@@ -82,6 +94,7 @@ except ImportError:  # pragma: no cover
 
 
 from reportlab.lib import colors  # noqa: E402
+from reportlab.lib.enums import TA_JUSTIFY  # noqa: E402
 from reportlab.lib.pagesizes import A4  # noqa: E402
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # noqa: E402
 from reportlab.lib.units import mm  # noqa: E402
@@ -129,9 +142,9 @@ FRAME_TOP = PAGE_H - 30.0
 INTRO_TOP = 714.0
 HEADING_BLOCK_HEIGHT = FRAME_TOP - INTRO_TOP
 BOTTOM_MARGIN = 18 * mm
-# Die Fußzeile bleibt bewusst schmaler eingerückt als der Inhalt (wie im
-# Original): sonst kollidiert der linke Fußzeilentext mit dem zentrierten.
-FOOTER_MARGIN = 15 * mm
+# Die Fußzeile fluchtet mit dem Inhalt (LEFT_MARGIN/RIGHT_EDGE) — sie darf
+# nicht breiter sein als Tabellen/Text darüber.
+FOOTER_CENTER_X = (LEFT_MARGIN + RIGHT_EDGE) / 2
 
 ACCENT_COLOR = colors.Color(0.6627, 0.2667, 0.2588)  # Original-Rot der Abschnittstitel
 RULE_COLOR = colors.black                            # Linie unter der Kopfzeile (1.0pt schwarz)
@@ -173,6 +186,18 @@ SECTION_STYLE = ParagraphStyle(
     textColor=ACCENT_COLOR, spaceBefore=6 * mm, spaceAfter=3 * mm, leading=19,
 )
 EMPTY_STYLE = ParagraphStyle("Leer", parent=STYLES["Normal"], fontSize=9, textColor=GREY)
+CONFIRM_STYLE = ParagraphStyle(
+    "Bestaetigung", parent=STYLES["Normal"], fontName=BODY_FONT, fontSize=9, leading=11.5,
+    alignment=TA_JUSTIFY,
+)
+SIGNATURE_LABEL_STYLE = ParagraphStyle(
+    "SignaturLabel", parent=STYLES["Normal"], fontName=BODY_FONT, fontSize=8, leading=10,
+)
+# Kantenlänge des Ankreuzkästchens vor dem Bestätigungstext.
+CHECKBOX_SIZE = 9.0
+# Höhe der Unterschriftslinie über dem Label (Platz für die handschriftliche
+# Unterschrift).
+SIGNATURE_LINE_HEIGHT = 14 * mm
 
 # Titel/Verlag brechen um (Paragraph); alle anderen Spalten bleiben Klartext
 # in exakt passend berechneten Breiten (siehe render_table). splitLongWords=0
@@ -211,6 +236,113 @@ def fmt_grades(grades: tuple[int, ...]) -> str:
     # Komma + Leerzeichen statt "/": erlaubt Zeilenumbruch in der schmalen
     # Klasse-Spalte, wenn ein Mehrjahresband viele Klassen abdeckt.
     return ", ".join(str(g) for g in grades)
+
+
+# Öffentliche TRG-Website (kein IServ, keine Produktionsdaten) — liefert die
+# Fach->Name-Zuordnung der Fachkonferenzleitungen für die Kopfzeile bei
+# --confirmation. Nur GET, rein lesend.
+FKL_URL = "https://trg-osterode.de/wir-am-trg/kollegium/fachkonferenzleitungen/"
+
+
+def _clean_cell(raw_html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", raw_html)
+    text = html.unescape(text).replace("\xa0", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_fkl_mapping(*, timeout: float = 10.0) -> dict[str, str]:
+    """Fach -> Name der Fachkonferenzleitung, live von der TRG-Website gelesen.
+
+    Die Seite enthält eine einzelne HTML-Tabelle (Fach, Name, Amtsbezeichnung)
+    mit leeren Trenn-/Überschriftszeilen ("Aufgabenfeld A/B/C") dazwischen —
+    die werden hier übersprungen (leere oder fehlende Zellen).
+    """
+    resp = requests.get(FKL_URL, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    table_match = re.search(r"<table>(.*?)</table>", resp.text, re.S)
+    if not table_match:
+        return {}
+    mapping: dict[str, str] = {}
+    for row in re.findall(r"<tr>(.*?)</tr>", table_match.group(1), re.S):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        if len(cells) < 2:
+            continue
+        subject, name = _clean_cell(cells[0]), _clean_cell(cells[1])
+        if subject and name:
+            mapping[subject] = name
+    return mapping
+
+
+def find_fkl_name(mapping: dict[str, str], subject: str) -> str | None:
+    """Name zum Fach — exakter Treffer zuerst, sonst Präfix-Abgleich in beide
+    Richtungen (Ausleihe-API kennt z.B. nur "Politik", die Website führt
+    "Politik-Wirtschaft")."""
+    if not mapping:
+        return None
+    cf = subject.casefold()
+    for key, name in mapping.items():
+        if key.casefold() == cf:
+            return name
+    for key, name in mapping.items():
+        key_cf = key.casefold()
+        if key_cf.startswith(cf) or cf.startswith(key_cf):
+            return name
+    return None
+
+
+# Kollegiumsseite: Name -> persönliches Lehrerkürzel (Spalte "Kürzel", z.B.
+# "Mk" für Meike Menkens) — nicht zu verwechseln mit den Fach-Kürzeln in der
+# "Fächer"-Spalte derselben Tabelle.
+KOLLEGIUM_URL = "https://trg-osterode.de/wir-am-trg/kollegium/"
+
+
+def fetch_kollegium_kuerzel_mapping(*, timeout: float = 10.0) -> dict[str, str]:
+    """Name -> Lehrerkürzel, live von der TRG-Kollegiumsseite gelesen
+    (Tabellenspalten: Name, Kürzel, Fächer, Amtsbezeichnung)."""
+    resp = requests.get(KOLLEGIUM_URL, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    table_match = re.search(r"<table[^>]*>(.*?)</table>", resp.text, re.S)
+    if not table_match:
+        return {}
+    mapping: dict[str, str] = {}
+    for row in re.findall(r"<tr>(.*?)</tr>", table_match.group(1), re.S):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        if len(cells) < 2:
+            continue
+        name, kuerzel = _clean_cell(cells[0]), _clean_cell(cells[1])
+        if name and kuerzel and name != "Name":  # Kopfzeile der Tabelle überspringen
+            mapping[name] = kuerzel
+    return mapping
+
+
+def _normalize_person_name(name: str) -> str:
+    return re.sub(r"[\s-]+", " ", name).strip().casefold()
+
+
+def find_kollegium_kuerzel(mapping: dict[str, str], person_name: str | None) -> str | None:
+    """Lehrerkürzel zu einem von find_fkl_name() gelieferten Namen — exakter
+    Treffer, sonst Namensabgleich ohne Bindestrich-/Leerzeichen-Unterschiede
+    (die beiden TRG-Seiten schreiben Namen nicht immer identisch)."""
+    if not person_name or not mapping:
+        return None
+    if person_name in mapping:
+        return mapping[person_name]
+    target = _normalize_person_name(person_name)
+    for name, abbrev in mapping.items():
+        if _normalize_person_name(name) == target:
+            return abbrev
+    # Fuzzy-Fallback: die beiden TRG-Seiten schreiben denselben Namen nicht
+    # immer identisch (beobachtet 2026-08-19: FKL-Seite "Kirscht-Nörthmann"
+    # vs. Kollegiumsseite "Kirscht Nörthemann") — bei sehr hoher Ähnlichkeit
+    # trotzdem zuordnen, statt das Kürzel ganz wegzulassen.
+    best_name, best_ratio = None, 0.0
+    for name in mapping:
+        ratio = difflib.SequenceMatcher(None, _normalize_person_name(name), target).ratio()
+        if ratio > best_ratio:
+            best_name, best_ratio = name, ratio
+    if best_name is not None and best_ratio >= 0.85:
+        return mapping[best_name]
+    return None
 
 
 def collect_entries(client: AusleiheClient, schoolyear_id: str) -> dict[tuple[str, str], dict]:
@@ -573,10 +705,11 @@ class SubjectHeading(Flowable):
     Höhe des Blocks, damit der Einleitungstext darunter beginnt.
     """
 
-    def __init__(self, schoolyear_id: str, subject: str) -> None:
+    def __init__(self, schoolyear_id: str, subject: str, *, confirm_value: str | None = None) -> None:
         super().__init__()
         self.schoolyear_id = schoolyear_id
         self.subject = subject
+        self.confirm_value = confirm_value
         self.width = CONTENT_WIDTH
         self.height = HEADING_BLOCK_HEIGHT
 
@@ -601,14 +734,185 @@ class SubjectHeading(Flowable):
         )
         c.drawRightString(dx + RIGHT_EDGE, dy + HEADER_VALUE_BASELINE, self.subject)
 
+        if self.confirm_value:
+            center_x = dx + FOOTER_CENTER_X
+            confirm_label = "Bücherliste bestätigen durch"
+
+            # Label-Zeile ("Liste für"/"gültig für"-Höhe): kurzer, fester
+            # Text — bei den üblichen Fach-/Jahr-Kürzeln links/rechts nie eng.
+            c.setFont(HEADER_LABEL_FONT, HEADER_LABEL_SIZE)
+            c.drawCentredString(center_x, dy + HEADER_LABEL_BASELINE, confirm_label)
+
+            # Wert-Zeile ("Schuljahr .."/<Fach>-Höhe): Kürzel mittig — bei
+            # langem Fachnamen + langem Ersatzwert (Fallback: Name statt
+            # Kürzel) notfalls verkleinern, damit nichts mit den beiden
+            # Rand-Werten kollidiert (analog Fußzeile).
+            left_val_w = c.stringWidth(
+                f"Schuljahr {short_schoolyear(self.schoolyear_id)}", HEADER_VALUE_FONT, HEADER_VALUE_SIZE,
+            )
+            right_val_w = c.stringWidth(self.subject, HEADER_VALUE_FONT, HEADER_VALUE_SIZE)
+            left_end = dx + LEFT_MARGIN + left_val_w
+            right_start = dx + RIGHT_EDGE - right_val_w
+            max_half_width = max(min(center_x - left_end, right_start - center_x) - 6, 10)
+
+            center_fs = HEADER_VALUE_SIZE
+            while center_fs > 7.0 and c.stringWidth(self.confirm_value, HEADER_VALUE_FONT, center_fs) / 2 > max_half_width:
+                center_fs -= 0.25
+
+            c.setFont(HEADER_VALUE_FONT, center_fs)
+            c.drawCentredString(center_x, dy + HEADER_VALUE_BASELINE, self.confirm_value)
+
         c.setFont(TITLE_FONT, TITLE_SIZE)
         c.drawString(dx + LEFT_MARGIN, dy + TITLE_BASELINE, f"Bücherliste {self.subject}")
         c.restoreState()
 
 
-def subject_story(subject: str, tables: dict[str, list[dict]], schoolyear_id: str) -> list:
+class ConfirmationBlock(Flowable):
+    """Einleitungssatz + zwei Ankreuzfelder + Unterschrift-Zeile am Fach-Listenende.
+
+    Einleitungssatz: "Hiermit bestätige ich im Namen der Fachschaft <Fach>,
+    dass ...". Oberes Kreuz: die Liste ist NICHT korrekt und soll um die
+    handschriftlich eingetragenen Änderungen ergänzt werden. Unteres Kreuz:
+    die Bücher sind richtig. Fließt normal im Textfluss mit — bei kurzen
+    Listen landet der Block dadurch am Ende der Tabellen, bei sehr langen
+    ggf. auf einer eigenen Folgeseite.
+    """
+
+    # Abstand zwischen den beiden Ankreuzzeilen und zwischen der zweiten
+    # Ankreuzzeile und der Unterschriftszeile darunter.
+    CHECKBOX_ROW_GAP = 4 * mm
+    # Abstand zwischen dem einleitenden Satz und der ersten Ankreuzzeile.
+    INTRO_GAP = 2 * mm
+
+    def __init__(self, subject: str, schoolyear_id: str, *, teacher_kuerzel: str | None = None) -> None:
+        super().__init__()
+        self.width = CONTENT_WIDTH
+        signature_label = f"Unterschrift Fachkonferenzleitung {subject}"
+        if teacher_kuerzel:
+            signature_label += f" ({teacher_kuerzel})"
+        self._intro_par = Paragraph(
+            f"Hiermit bestätige ich im Namen der Fachschaft {subject}, dass die oben "
+            f"aufgeführten Bücher der Bücherliste {subject} und insbesondere deren ISBN "
+            f"für das Schuljahr {schoolyear_id}",
+            CONFIRM_STYLE,
+        )
+        _, self._intro_h = self._intro_par.wrap(self.width, 0xFFFFFF)
+
+        text_width = self.width - CHECKBOX_SIZE - 6
+        self._checkbox_pars = [
+            Paragraph(
+                "nicht korrekt ist und um die handschriftlichen Anmerkungen "
+                "(Durchstreichungen; Eintragungen neuer Bücher, Klassen, ...) "
+                "verändert werden muss.",
+                CONFIRM_STYLE,
+            ),
+            Paragraph(
+                "korrekt ist, an die Schüler übermittelt werden kann und eine "
+                "nachträgliche Änderung unter Umständen nicht mehr gestattet werden "
+                "kann.",
+                CONFIRM_STYLE,
+            ),
+        ]
+        self._checkbox_heights = [p.wrap(text_width, 0xFFFFFF)[1] for p in self._checkbox_pars]
+        checkbox_block_h = (
+            sum(max(h, CHECKBOX_SIZE) for h in self._checkbox_heights)
+            + self.CHECKBOX_ROW_GAP
+        )
+
+        # Linke Hälfte: "Ort, Datum" mit einer Linie. Rechte Hälfte:
+        # "Unterschrift Fachkonferenzleitung <Fach>" mit einer eigenen Linie.
+        # Eine leere Spalter dazwischen (ohne Linie) sorgt für einen
+        # sichtbaren Spalt zwischen den beiden Linien.
+        sig_col_w = (self.width - MIN_GAP) / 2
+        self._sig_table = Table(
+            [
+                ["", "", ""],
+                [
+                    Paragraph("Ort, Datum", SIGNATURE_LABEL_STYLE),
+                    "",
+                    Paragraph(signature_label, SIGNATURE_LABEL_STYLE),
+                ],
+            ],
+            colWidths=[sig_col_w, MIN_GAP, sig_col_w],
+            rowHeights=[SIGNATURE_LINE_HEIGHT, None],
+        )
+        self._sig_table.setStyle(TableStyle([
+            ("LINEABOVE", (0, 1), (0, 1), 0.75, colors.black),
+            ("LINEABOVE", (2, 1), (2, 1), 0.75, colors.black),
+            ("TOPPADDING", (0, 1), (-1, 1), 2.0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, 0), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ]))
+        _, self._sig_h = self._sig_table.wrap(self.width, 0xFFFFFF)
+        self.height = self._intro_h + self.INTRO_GAP + checkbox_block_h + 8 * mm + self._sig_h
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        return self.width, self.height
+
+    def draw(self) -> None:
+        c = self.canv
+        c.saveState()
+        c.setLineWidth(0.75)
+        c.setStrokeColor(colors.black)
+        self._intro_par.drawOn(c, 0, self.height - self._intro_h)
+        y = self.height - self._intro_h - self.INTRO_GAP
+        for par, par_h in zip(self._checkbox_pars, self._checkbox_heights):
+            row_h = max(par_h, CHECKBOX_SIZE)
+            c.rect(0, y - CHECKBOX_SIZE, CHECKBOX_SIZE, CHECKBOX_SIZE)
+            par.drawOn(c, CHECKBOX_SIZE + 6, y - par_h)
+            y -= row_h + self.CHECKBOX_ROW_GAP
+        self._sig_table.drawOn(c, 0, 0)
+        c.restoreState()
+
+
+class BottomAnchor(Flowable):
+    """Drückt `inner` an das untere Ende des verbleibenden Frame-Bereichs.
+
+    Beansprucht immer die komplette auf der aktuellen Seite noch verfügbare
+    Höhe (statt nur die eigene Inhaltshöhe), sodass `inner` beim Zeichnen
+    unten in dieser Fläche landet — also direkt über der Fußzeile, egal wie
+    viel Text/Tabellen vorher im Frame stehen. Passt `inner` nicht mehr auf
+    die aktuelle Seite, wird der komplette Block (reportlab-Standardverhalten
+    für nicht teilbare Flowables) auf die nächste Seite verschoben, wo er
+    dann entsprechend am unteren Rand der neuen, leeren Fläche sitzt.
+    """
+
+    def __init__(self, inner: Flowable) -> None:
+        super().__init__()
+        self.inner = inner
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        _, inner_h = self.inner.wrap(availWidth, availHeight)
+        self._inner_h = inner_h
+        # Passt inner nicht in den Rest der aktuellen Seite: mehr Höhe
+        # melden, als zur Verfügung steht, damit reportlab den gesamten Block
+        # auf die nächste Seite verschiebt statt ihn hier abzuschneiden.
+        self.height = availHeight if inner_h <= availHeight else availHeight + inner_h
+        return availWidth, self.height
+
+    def draw(self) -> None:
+        self.inner.drawOn(self.canv, 0, 0)
+
+
+def subject_story(
+    subject: str, tables: dict[str, list[dict]], schoolyear_id: str, *,
+    confirmation: bool = False, fkl_map: dict[str, str] | None = None,
+    kollegium_map: dict[str, str] | None = None,
+) -> list:
+    confirm_value = None
+    teacher_kuerzel = None
+    if confirmation:
+        fkl_name = find_fkl_name(fkl_map or {}, subject)
+        teacher_kuerzel = find_kollegium_kuerzel(kollegium_map or {}, fkl_name)
+        # Kopfzeile zeigt bevorzugt das Kürzel; ist das nicht auflösbar,
+        # ersatzweise der Name, sonst ein Platzhalter (nie komplett leer).
+        confirm_value = teacher_kuerzel or fkl_name or "–"
+
     story: list = [
-        SubjectHeading(schoolyear_id, subject),
+        SubjectHeading(schoolyear_id, subject, confirm_value=confirm_value),
         Paragraph(
             f"Die folgenden Bücher können für das Fach {subject} über die Schule ausgeliehen werden. "
             "Bücher, die selbst anzuschaffen sind, werden gesondert in der zweiten Tabelle ausgewiesen.",
@@ -628,6 +932,11 @@ def subject_story(subject: str, tables: dict[str, list[dict]], schoolyear_id: st
     else:
         story.append(Paragraph("Keine selbst anzuschaffenden Bücher in diesem Fach.", EMPTY_STYLE))
 
+    if confirmation:
+        story.append(
+            BottomAnchor(ConfirmationBlock(subject, schoolyear_id, teacher_kuerzel=teacher_kuerzel))
+        )
+
     return story
 
 
@@ -637,19 +946,19 @@ def make_footer(center_text: str):
     generated = datetime.now().strftime("%d.%m.%Y")
 
     def _draw(c: Canvas, doc: BaseDocTemplate) -> None:
-        width, _height = A4
         left_text = f"Erstellt am {generated}"
         right_text = f"Seite {doc.page}"
         base_fs, min_fs, gap = 7.5, 6.0, 4
 
         c.saveState()
         c.setFillColor(GREY)
-        left_end = FOOTER_MARGIN + c.stringWidth(left_text, "Helvetica", base_fs)
-        right_start = width - FOOTER_MARGIN - c.stringWidth(right_text, "Helvetica", base_fs)
-        # Zentrierter Text steht bei width/2 — maßgeblich ist der KLEINERE der
-        # beiden Abstände zur linken/rechten Fußzeile, nicht die Summe (sonst
-        # ragt er bei asymmetrischen Rand-Texten trotzdem in eine Seite hinein).
-        max_half_width = max(min(width / 2 - left_end, right_start - width / 2) - gap, 10)
+        left_end = LEFT_MARGIN + c.stringWidth(left_text, "Helvetica", base_fs)
+        right_start = RIGHT_EDGE - c.stringWidth(right_text, "Helvetica", base_fs)
+        # Zentrierter Text steht bei FOOTER_CENTER_X — maßgeblich ist der
+        # KLEINERE der beiden Abstände zur linken/rechten Fußzeile, nicht die
+        # Summe (sonst ragt er bei asymmetrischen Rand-Texten trotzdem in
+        # eine Seite hinein).
+        max_half_width = max(min(FOOTER_CENTER_X - left_end, right_start - FOOTER_CENTER_X) - gap, 10)
 
         # Der mittige Schule+Kontext-Text kann bei langen Fachnamen mit dem
         # linken/rechten Fußzeilentext kollidieren (beobachtet 2026-08-18,
@@ -660,10 +969,10 @@ def make_footer(center_text: str):
             center_fs -= 0.25
 
         c.setFont("Helvetica", base_fs)
-        c.drawString(FOOTER_MARGIN, 10 * mm, left_text)
-        c.drawRightString(width - FOOTER_MARGIN, 10 * mm, right_text)
+        c.drawString(LEFT_MARGIN, 10 * mm, left_text)
+        c.drawRightString(RIGHT_EDGE, 10 * mm, right_text)
         c.setFont("Helvetica", center_fs)
-        c.drawCentredString(width / 2, 10 * mm, center_text)
+        c.drawCentredString(FOOTER_CENTER_X, 10 * mm, center_text)
         c.restoreState()
 
     return _draw
@@ -710,6 +1019,10 @@ def main() -> None:
         help="Nur die verfügbaren Fächer auflisten und beenden",
     )
     parser.add_argument("--output-dir", default=None, help="Zielordner (Default: dieser Skriptordner)")
+    parser.add_argument(
+        "--confirmation", action="store_true",
+        help="Ankreuzfeld + Ort/Datum/Unterschrift Fachkonferenzleitung am Ende jeder Fach-Liste ergänzen",
+    )
     args = parser.parse_args()
 
     client = AusleiheClient(allow_writes=False)
@@ -748,6 +1061,26 @@ def main() -> None:
             sys.exit(1)
         subjects = sorted(selected, key=str.casefold)
 
+    fkl_map: dict[str, str] = {}
+    kollegium_map: dict[str, str] = {}
+    if args.confirmation:
+        try:
+            fkl_map = fetch_fkl_mapping()
+        except Exception as exc:  # Netzwerk/Parsing-Fehler sollen die PDF-Erzeugung nicht abbrechen
+            print(
+                f"Warnung: Fachkonferenzleitungen konnten nicht von {FKL_URL} geladen werden ({exc}) "
+                "— Kopfzeile/Unterschriftszeile bleiben ohne Namen/Kürzel.",
+                file=sys.stderr,
+            )
+        try:
+            kollegium_map = fetch_kollegium_kuerzel_mapping()
+        except Exception as exc:
+            print(
+                f"Warnung: Lehrerkürzel konnten nicht von {KOLLEGIUM_URL} geladen werden ({exc}) "
+                "— Kopfzeile/Unterschriftszeile zeigen ersatzweise den vollen Namen bzw. bleiben ohne Kürzel.",
+                file=sys.stderr,
+            )
+
     out_dir = Path(args.output_dir) if args.output_dir else _HERE
     out_dir.mkdir(parents=True, exist_ok=True)
     sy_label = sanitize_filename(schoolyear_id)
@@ -757,14 +1090,22 @@ def main() -> None:
         for i, subject in enumerate(subjects):
             if i > 0:
                 story.append(PageBreak())
-            story.extend(subject_story(subject, by_subject[subject], schoolyear_id))
+            story.extend(
+                subject_story(
+                    subject, by_subject[subject], schoolyear_id,
+                    confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map,
+                )
+            )
         out_path = out_dir / f"Bücherliste Fächer {sy_label}.pdf"
         footer_center = f"{SCHOOL_NAME} – Bücherliste Fächer (Schuljahr {schoolyear_id})"
         write_pdf(out_path, story, title=f"Bücherliste Fächer {schoolyear_id}", footer_center=footer_center)
         print(f"PDF gespeichert: {out_path}")
     else:
         for subject in subjects:
-            story = subject_story(subject, by_subject[subject], schoolyear_id)
+            story = subject_story(
+                subject, by_subject[subject], schoolyear_id,
+                confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map,
+            )
             out_path = out_dir / f"Bücherliste {subject} {sy_label}.pdf"
             footer_center = f"{SCHOOL_NAME} – Bücherliste {subject} (Schuljahr {schoolyear_id})"
             write_pdf(out_path, story, title=f"Bücherliste {subject} {schoolyear_id}", footer_center=footer_center)
