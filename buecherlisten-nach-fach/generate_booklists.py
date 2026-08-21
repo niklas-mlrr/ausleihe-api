@@ -32,7 +32,7 @@ Rein lesend (nur GET). Kein Schreibzugriff auf die IServ-Produktionsdatenbank.
 Verwendung:
   python3 generate_booklists.py [--schoulyear 2026/2027] [--mode combined|split]
                                  [--subjects "Fach1" "Fach2" ...] [--list-subjects]
-                                 [--output-dir PFAD] [--confirmation]
+                                 [--output-dir PFAD] [--confirmation] [--duplex | --duplex-if-needed]
 
   --schoolyear     Schuljahr wie "2026/2027" (Default: laufendes Schuljahr)
   --mode           combined = eine PDF-Datei mit einer neuen Seite pro Fach,
@@ -53,12 +53,23 @@ Verwendung:
                     Namen mittig in der Kopfzeile; schlägt der Abruf fehl oder
                     ist das Fach dort nicht gelistet, steht dort ersatzweise
                     "Bestätigung".
+  --duplex         Für doppelseitigen Druck vorbereiten: jedes Fach bekommt
+                    nötigenfalls eine leere Endseite, damit seine Seitenzahl
+                    gerade ist (sonst würde beim doppelseitigen Druck das
+                    nächste Fach auf der Rückseite der letzten Seite des
+                    vorherigen beginnen).
+  --duplex-if-needed  Wie --duplex, aber nur wirksam, wenn mindestens ein Fach
+                    von Natur aus (ohne jede Polsterung) mehr als eine Seite
+                    braucht. Sind alle Fächer ohnehin einseitig, bleibt die
+                    Ausgabe unverändert (keine Leerseiten). Schließt sich mit
+                    --duplex gegenseitig aus.
 """
 from __future__ import annotations
 
 import argparse
 import difflib
 import html
+import io
 import re
 import sys
 from collections import defaultdict
@@ -104,6 +115,7 @@ from reportlab.platypus import (  # noqa: E402
     BaseDocTemplate,
     Flowable,
     Frame,
+    NextPageTemplate,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -145,6 +157,18 @@ BOTTOM_MARGIN = 18 * mm
 # Die Fußzeile fluchtet mit dem Inhalt (LEFT_MARGIN/RIGHT_EDGE) — sie darf
 # nicht breiter sein als Tabellen/Text darüber.
 FOOTER_CENTER_X = (LEFT_MARGIN + RIGHT_EDGE) / 2
+
+# Fußzeile exakt wie im Original ("Bücherliste Jahrgang 5.pdf", pdfplumber
+# 2026-08-21): zwei Zeilen Helvetica 6pt in Schwarz, Grundlinien absolut vom
+# Seitenunterrand aus gemessen. Obere Zeile rechtsbündig "Seite n von N",
+# untere Zeile links das Erstelldatum (im Original: die URL) und rechtsbündig
+# Schule + Kontext.
+FOOTER_FONT, FOOTER_SIZE = "Helvetica", 6.0
+FOOTER_PAGE_BASELINE = 25.692               # Grundlinie "Seite n von N"
+FOOTER_INFO_BASELINE = 20.142               # Grundlinie Datum / Schule+Kontext
+FOOTER_COLOR = colors.black
+# Ortszusatz, den das Original hinter dem Schulnamen führt.
+SCHOOL_CITY = "Osterode am Harz"
 
 ACCENT_COLOR = colors.Color(0.6627, 0.2667, 0.2588)  # Original-Rot der Abschnittstitel
 RULE_COLOR = colors.black                            # Linie unter der Kopfzeile (1.0pt schwarz)
@@ -897,10 +921,110 @@ class BottomAnchor(Flowable):
         self.inner.drawOn(self.canv, 0, 0)
 
 
+class _RecordPage(Flowable):
+    """Nullgroßes Flowable: merkt sich beim Layout die Seitenzahl an dieser
+    Stelle im Textfluss (in `holder[0]`) — Grundlage für `_PadToEvenPages`.
+
+    `_ZEROSIZE` weist reportlabs Frame an, `wrap()` auch dann noch
+    aufzurufen, wenn im Frame kein Platz mehr übrig ist (z.B. weil ein
+    vorangehendes `BottomAnchor` bereits die komplette Resthöhe der Seite für
+    sich beansprucht hat) — ohne das würde Frame._add() bei Resthöhe 0 sofort
+    (ohne wrap()-Aufruf) auf die nächste Seite ausweichen, und die hier
+    gemessene Seitenzahl wäre dann schon die der falschen, nächsten Seite."""
+
+    _ZEROSIZE = 1
+
+    def __init__(self, holder: list) -> None:
+        super().__init__()
+        self.width = self.height = 0
+        self.holder = holder
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        self.holder[0] = self.canv.getPageNumber()
+        return 0, 0
+
+    def draw(self) -> None:
+        pass
+
+
+class _PadToEvenPages(Flowable):
+    """Erzwingt eine zusätzliche Leerseite, wenn das Fach seit dem
+    zugehörigen `_RecordPage` eine ungerade Seitenzahl belegt (--duplex: jedes
+    Fach soll mit gerader Seitenzahl enden, damit beim doppelseitigen Druck
+    kein Fach auf der Rückseite eines anderen beginnt).
+
+    Nutzt denselben Trick wie `BottomAnchor`: mehr Höhe melden, als auf der
+    aktuellen Seite noch verfügbar ist, damit reportlab dieses (unsichtbare)
+    Flowable auf eine neue, sonst leere Seite verschiebt.
+
+    `blank_pages`, falls übergeben, wird um die Seitenzahl der so erzwungenen
+    Leerseite ergänzt — `make_footer()` lässt deren Fußzeile dadurch weg,
+    damit die Seite wirklich komplett leer bleibt (weißes Blatt, keine
+    Kopf-/Fußzeile), wie es für doppelseitigen Druck erwartet wird.
+
+    `_ZEROSIZE` (siehe `_RecordPage`) ist hier essenziell: ohne sie würde
+    reportlab bei Resthöhe 0 (typischer Fall direkt nach `BottomAnchor`)
+    automatisch und ungefragt eine neue Seite beginnen, bevor `wrap()`
+    überhaupt zum Zuge kommt — die Entscheidung "muss gepolstert werden"
+    fiele dann immer auf der bereits (fälschlich) neuen Seite, nie auf der
+    tatsächlich letzten Inhaltsseite."""
+
+    _ZEROSIZE = 1
+
+    def __init__(self, start_page_holder: list, blank_pages: set[int] | None = None) -> None:
+        super().__init__()
+        self.width = self.height = 0
+        self.start_page_holder = start_page_holder
+        self.blank_pages = blank_pages
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        current_page = self.canv.getPageNumber()
+        pages_used = current_page - self.start_page_holder[0] + 1
+        if pages_used % 2 == 1:
+            if self.blank_pages is not None:
+                self.blank_pages.add(current_page + 1)
+            return availWidth, availHeight + 1
+        return 0, 0
+
+    def draw(self) -> None:
+        pass
+
+
+class _RecordEndPage(Flowable):
+    """Nullgroßes Flowable (siehe `_RecordPage`): merkt sich am Fach-Ende die
+    aktuelle Seitenzahl in `results[index]`, ohne — anders als
+    `_PadToEvenPages` — je eine Leerseite zu erzwingen. Grundlage für den
+    Messlauf hinter `--duplex-if-needed` (`measure_subject_pages()`): dort
+    soll nur die *natürliche* Seitenzahl je Fach ermittelt werden.
+
+    Braucht `_ZEROSIZE` aus demselben Grund wie `_PadToEvenPages`: ohne sie
+    würde reportlab bei Resthöhe 0 (typisch direkt nach `BottomAnchor`) schon
+    selbst auf eine neue Seite wechseln, bevor `wrap()` aufgerufen wird — die
+    hier gemessene Seitenzahl wäre dann um eins zu hoch."""
+
+    _ZEROSIZE = 1
+
+    def __init__(self, start_page_holder: list, results: list[int], index: int) -> None:
+        super().__init__()
+        self.width = self.height = 0
+        self.start_page_holder = start_page_holder
+        self.results = results
+        self.index = index
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        current_page = self.canv.getPageNumber()
+        self.results[self.index] = current_page - self.start_page_holder[0] + 1
+        return 0, 0
+
+    def draw(self) -> None:
+        pass
+
+
 def subject_story(
     subject: str, tables: dict[str, list[dict]], schoolyear_id: str, *,
     confirmation: bool = False, fkl_map: dict[str, str] | None = None,
-    kollegium_map: dict[str, str] | None = None,
+    kollegium_map: dict[str, str] | None = None, duplex: bool = False,
+    blank_pages: set[int] | None = None,
 ) -> list:
     confirm_value = None
     teacher_kuerzel = None
@@ -911,7 +1035,11 @@ def subject_story(
         # ersatzweise der Name, sonst ein Platzhalter (nie komplett leer).
         confirm_value = teacher_kuerzel or fkl_name or "–"
 
-    story: list = [
+    start_page_holder: list = [None]
+    story: list = []
+    if duplex:
+        story.append(_RecordPage(start_page_holder))
+    story += [
         SubjectHeading(schoolyear_id, subject, confirm_value=confirm_value),
         Paragraph(
             f"Die folgenden Bücher können für das Fach {subject} über die Schule ausgeliehen werden. "
@@ -937,48 +1065,160 @@ def subject_story(
             BottomAnchor(ConfirmationBlock(subject, schoolyear_id, teacher_kuerzel=teacher_kuerzel))
         )
 
+    if duplex:
+        story.append(_PadToEvenPages(start_page_holder, blank_pages))
+
     return story
 
 
-def make_footer(center_text: str):
-    """onPage-Callback: Fußzeile ähnlich den offiziellen IServ-PDFs
-    (Erstellungsdatum links, Seitenzahl rechts, Schule+Kontext mittig)."""
+def measure_subject_pages(
+    subjects: list[str], by_subject: dict[str, dict[str, list[dict]]], schoolyear_id: str, *,
+    confirmation: bool, fkl_map: dict[str, str], kollegium_map: dict[str, str],
+) -> list[int]:
+    """Baut alle Fächer einmal probeweise in einen verworfenen Speicherpuffer
+    (kein Datei-Output), jedes mit eigenem, frisch beginnendem PageTemplate —
+    damit ist die ermittelte Seitenzahl je Fach unabhängig vom später
+    tatsächlich gewählten `--mode` (combined/split) und entspricht exakt der
+    natürlichen (ungepolsterten) Seitenzahl, die dieses Fach auch im
+    Enddokument bräuchte.
+
+    Grundlage für `--duplex-if-needed`: nur wenn dabei mindestens ein Fach
+    bereits mehr als eine Seite braucht, lohnt sich das Anhängen von
+    Leerseiten für den doppelseitigen Druck (siehe `main()`)."""
+    doc = BaseDocTemplate(
+        io.BytesIO(), pagesize=A4, leftMargin=LEFT_MARGIN, rightMargin=RIGHT_MARGIN,
+        topMargin=PAGE_H - FRAME_TOP, bottomMargin=BOTTOM_MARGIN,
+    )
+    page_counts: list[int] = [0] * len(subjects)
+    templates = []
+    story: list = []
+    for i, subject in enumerate(subjects):
+        frame = Frame(
+            LEFT_MARGIN, BOTTOM_MARGIN, CONTENT_WIDTH, FRAME_TOP - BOTTOM_MARGIN,
+            leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0, id=f"measure-{i}",
+        )
+        template_id = f"measure-{i}"
+        templates.append(PageTemplate(id=template_id, frames=[frame]))
+        if i > 0:
+            story.append(NextPageTemplate(template_id))
+            story.append(PageBreak())
+        start_page_holder: list = [None]
+        story.append(_RecordPage(start_page_holder))
+        story.extend(
+            subject_story(
+                subject, by_subject[subject], schoolyear_id,
+                confirmation=confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map, duplex=False,
+            )
+        )
+        story.append(_RecordEndPage(start_page_holder, page_counts, i))
+    doc.addPageTemplates(templates)
+    doc.build(story)
+    return page_counts
+
+
+def footer_context(subject_or_label: str, schoolyear_id: str) -> str:
+    """Rechtsbündiger Fußzeilentext, Wort für Wort wie im Original-PDF
+    aufgebaut ("<Schule>, <Ort> – Bücherliste <Kontext> (Schuljahr 26/27)") —
+    nur der Kontext ist hier das Fach bzw. "Fächer" statt "Jahrgang X"."""
+    return (
+        f"{SCHOOL_NAME}, {SCHOOL_CITY} – Bücherliste {subject_or_label} "
+        f"(Schuljahr {short_schoolyear(schoolyear_id)})"
+    )
+
+
+def make_footer(center_text: str, *, page_offset_holder: list | None = None, blank_pages: set[int] | None = None):
+    """onPage-Callback: Fußzeile wie in den offiziellen IServ-Bücherlisten.
+
+    Gezeichnet wird hier noch nichts — die Fußzeile nennt "Seite n von N", und
+    N steht erst fest, wenn das Dokument fertig gesetzt ist. Der Callback legt
+    darum nur die Angaben der aktuellen Seite auf dem Canvas ab; `FooterCanvas`
+    zeichnet sie am Ende des Builds nach (siehe dort).
+
+    `page_offset_holder` ist ein einelementiger mutabler Fach-eigener
+    Zwischenspeicher (`[None]`): wird beim ersten Aufruf mit der aktuellen
+    (dokumentweiten) `doc.page` belegt, sodass die angezeigte Seitenzahl für
+    dieses Fach wieder bei 1 beginnt, statt über das gesamte kombinierte PDF
+    durchzuzählen (siehe write_combined_confirmation_pdf).
+
+    `blank_pages` (--duplex) listet die von `_PadToEvenPages` erzwungenen
+    Leerseiten dieses Dokuments — auf ihnen wird gar nichts gezeichnet, auch
+    keine Fußzeile, damit sie beim doppelseitigen Druck wirklich komplett
+    leer (weiß) bleiben."""
     generated = datetime.now().strftime("%d.%m.%Y")
 
     def _draw(c: Canvas, doc: BaseDocTemplate) -> None:
-        left_text = f"Erstellt am {generated}"
-        right_text = f"Seite {doc.page}"
-        base_fs, min_fs, gap = 7.5, 6.0, 4
-
-        c.saveState()
-        c.setFillColor(GREY)
-        left_end = LEFT_MARGIN + c.stringWidth(left_text, "Helvetica", base_fs)
-        right_start = RIGHT_EDGE - c.stringWidth(right_text, "Helvetica", base_fs)
-        # Zentrierter Text steht bei FOOTER_CENTER_X — maßgeblich ist der
-        # KLEINERE der beiden Abstände zur linken/rechten Fußzeile, nicht die
-        # Summe (sonst ragt er bei asymmetrischen Rand-Texten trotzdem in
-        # eine Seite hinein).
-        max_half_width = max(min(FOOTER_CENTER_X - left_end, right_start - FOOTER_CENTER_X) - gap, 10)
-
-        # Der mittige Schule+Kontext-Text kann bei langen Fachnamen mit dem
-        # linken/rechten Fußzeilentext kollidieren (beobachtet 2026-08-18,
-        # z.B. "Werte und Normen") — Schriftgröße notfalls schrittweise
-        # verkleinern, bis er in die verbleibende Lücke passt.
-        center_fs = base_fs
-        while center_fs > min_fs and c.stringWidth(center_text, "Helvetica", center_fs) / 2 > max_half_width:
-            center_fs -= 0.25
-
-        c.setFont("Helvetica", base_fs)
-        c.drawString(LEFT_MARGIN, 10 * mm, left_text)
-        c.drawRightString(RIGHT_EDGE, 10 * mm, right_text)
-        c.setFont("Helvetica", center_fs)
-        c.drawCentredString(FOOTER_CENTER_X, 10 * mm, center_text)
-        c.restoreState()
+        if blank_pages is not None and doc.page in blank_pages:
+            return
+        if page_offset_holder is not None:
+            if page_offset_holder[0] is None:
+                page_offset_holder[0] = doc.page
+            page_num = doc.page - page_offset_holder[0] + 1
+        else:
+            page_num = doc.page
+        # Gruppenschlüssel für "von N": im kombinierten Bestätigungs-PDF zählt
+        # jedes Fach eigenständig, und dort ist center_text je Fach verschieden.
+        c._footer_spec = (center_text, page_num, generated)
 
     return _draw
 
 
-def write_pdf(path: Path, story: list, title: str, footer_center: str) -> None:
+def draw_footer(c: Canvas, page_num: int, total_pages: int, center_text: str, generated: str) -> None:
+    """Zeichnet die zweizeilige Fußzeile an den aus dem Original übernommenen
+    absoluten Grundlinien (FOOTER_PAGE_BASELINE / FOOTER_INFO_BASELINE)."""
+    c.saveState()
+    c.setFillColor(FOOTER_COLOR)
+    c.setFont(FOOTER_FONT, FOOTER_SIZE)
+    c.drawRightString(RIGHT_EDGE, FOOTER_PAGE_BASELINE, f"Seite {page_num} von {total_pages}")
+    c.drawString(LEFT_MARGIN, FOOTER_INFO_BASELINE, f"Erstellt: {generated}")
+    c.drawRightString(RIGHT_EDGE, FOOTER_INFO_BASELINE, center_text)
+    c.restoreState()
+
+
+class FooterCanvas(Canvas):
+    """Canvas, der die Fußzeilen erst nach dem Setzen des Dokuments zeichnet.
+
+    Nötig für "Seite n von N": die Gesamtseitenzahl ist während des Builds noch
+    unbekannt. Jede Seite wird darum zunächst zwischengespeichert; `save()`
+    stellt sie einzeln wieder her, zeichnet die Fußzeile (jetzt mit bekanntem
+    N) und gibt sie erst dann aus.
+
+    N ist die Seitenzahl der jeweiligen Fußzeilen-Gruppe (`center_text`), damit
+    im kombinierten Bestätigungs-PDF jedes Fach für sich zählt. Seiten ohne
+    hinterlegte Angaben (`--duplex`-Leerseiten) bleiben leer und zählen nicht
+    mit."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._saved_states: list[dict] = []
+        self._footer_specs: list[tuple | None] = []
+        self._footer_spec: tuple | None = None
+
+    def showPage(self) -> None:
+        self._footer_specs.append(self._footer_spec)
+        self._footer_spec = None
+        self._saved_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self) -> None:
+        # Lokale Kopien: __dict__.update() unten überschreibt die Attribute
+        # mit dem Stand der jeweiligen Seite.
+        states, specs = self._saved_states, self._footer_specs
+        totals: dict[str, int] = {}
+        for spec in specs:
+            if spec is not None:
+                totals[spec[0]] = max(totals.get(spec[0], 0), spec[1])
+        for state, spec in zip(states, specs):
+            self.__dict__.update(state)
+            if spec is not None:
+                center_text, page_num, generated = spec
+                draw_footer(self, page_num, totals[center_text], center_text, generated)
+            super().showPage()
+        super().save()
+
+
+def write_pdf(
+    path: Path, story: list, title: str, footer_center: str, *, blank_pages: set[int] | None = None,
+) -> None:
     # BaseDocTemplate statt SimpleDocTemplate: dessen Frame hat 6pt Innenrand,
     # der den Inhalt gegenüber den Seitenrändern verschiebt. Hier soll der Text
     # exakt auf LEFT_MARGIN/RIGHT_EDGE sitzen → Frame-Padding auf 0.
@@ -995,8 +1235,57 @@ def write_pdf(path: Path, story: list, title: str, footer_center: str) -> None:
         LEFT_MARGIN, BOTTOM_MARGIN, CONTENT_WIDTH, FRAME_TOP - BOTTOM_MARGIN,
         leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0, id="content",
     )
-    doc.addPageTemplates([PageTemplate(id="fach", frames=[frame], onPage=make_footer(footer_center))])
-    doc.build(story)
+    doc.addPageTemplates(
+        [PageTemplate(id="fach", frames=[frame], onPage=make_footer(footer_center, blank_pages=blank_pages))]
+    )
+    doc.build(story, canvasmaker=FooterCanvas)
+
+
+def write_combined_confirmation_pdf(
+    path: Path, subjects: list[str], by_subject: dict[str, dict[str, list[dict]]],
+    schoolyear_id: str, *, fkl_map: dict[str, str], kollegium_map: dict[str, str], title: str,
+    duplex: bool = False,
+) -> None:
+    """Wie write_pdf, aber ein eigenes PageTemplate je Fach: mit --confirmation
+    soll die Seitenzahl je Fach wieder bei 1 beginnen und die Fußzeile das
+    jeweilige Fach statt "Fächer" nennen (Bestätigungs-Vorlage ist pro Fach an
+    eine reale Person adressiert, da wirkt eine durchlaufende Gesamt-
+    Seitenzahl/"Fächer"-Fußzeile über das ganze Dokument fehl am Platz)."""
+    doc = BaseDocTemplate(
+        str(path), pagesize=A4, leftMargin=LEFT_MARGIN, rightMargin=RIGHT_MARGIN,
+        topMargin=PAGE_H - FRAME_TOP, bottomMargin=BOTTOM_MARGIN, title=title,
+    )
+    # Eine gemeinsame blank_pages-Menge über das ganze (kombinierte) Dokument
+    # hinweg — Seitenzahlen sind dokumentweit eindeutig, auch über die
+    # per-Fach-PageTemplates hinweg, daher genügt ein einziges Set.
+    blank_pages: set[int] = set()
+    templates = []
+    story: list = []
+    for i, subject in enumerate(subjects):
+        frame = Frame(
+            LEFT_MARGIN, BOTTOM_MARGIN, CONTENT_WIDTH, FRAME_TOP - BOTTOM_MARGIN,
+            leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0, id=f"content-{i}",
+        )
+        footer_center = footer_context(subject, schoolyear_id)
+        template_id = f"fach-{i}"
+        templates.append(
+            PageTemplate(
+                id=template_id, frames=[frame],
+                onPage=make_footer(footer_center, page_offset_holder=[None], blank_pages=blank_pages),
+            )
+        )
+        if i > 0:
+            story.append(NextPageTemplate(template_id))
+            story.append(PageBreak())
+        story.extend(
+            subject_story(
+                subject, by_subject[subject], schoolyear_id,
+                confirmation=True, fkl_map=fkl_map, kollegium_map=kollegium_map, duplex=duplex,
+                blank_pages=blank_pages,
+            )
+        )
+    doc.addPageTemplates(templates)
+    doc.build(story, canvasmaker=FooterCanvas)
 
 
 def sanitize_filename(name: str) -> str:
@@ -1022,6 +1311,18 @@ def main() -> None:
     parser.add_argument(
         "--confirmation", action="store_true",
         help="Ankreuzfeld + Ort/Datum/Unterschrift Fachkonferenzleitung am Ende jeder Fach-Liste ergänzen",
+    )
+    duplex_group = parser.add_mutually_exclusive_group()
+    duplex_group.add_argument(
+        "--duplex", action="store_true",
+        help="Für doppelseitigen Druck vorbereiten: jedes Fach bekommt bei Bedarf eine leere Endseite, "
+             "damit seine Seitenzahl gerade ist",
+    )
+    duplex_group.add_argument(
+        "--duplex-if-needed", action="store_true",
+        help="Wie --duplex, aber nur wirksam, wenn mindestens ein Fach von Natur aus (ungepolstert) "
+             "mehr als eine Seite braucht; sind alle Fächer ohnehin einseitig, bleibt die Ausgabe "
+             "unverändert (keine Leerseiten)",
     )
     args = parser.parse_args()
 
@@ -1081,34 +1382,66 @@ def main() -> None:
                 file=sys.stderr,
             )
 
+    effective_duplex = args.duplex
+    if args.duplex_if_needed:
+        page_counts = measure_subject_pages(
+            subjects, by_subject, schoolyear_id,
+            confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map,
+        )
+        effective_duplex = any(count > 1 for count in page_counts)
+
     out_dir = Path(args.output_dir) if args.output_dir else _HERE
     out_dir.mkdir(parents=True, exist_ok=True)
     sy_label = sanitize_filename(schoolyear_id)
 
     if args.mode == "combined":
-        story: list = []
-        for i, subject in enumerate(subjects):
-            if i > 0:
-                story.append(PageBreak())
-            story.extend(
-                subject_story(
-                    subject, by_subject[subject], schoolyear_id,
-                    confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map,
-                )
-            )
         out_path = out_dir / f"Bücherliste Fächer {sy_label}.pdf"
-        footer_center = f"{SCHOOL_NAME} – Bücherliste Fächer (Schuljahr {schoolyear_id})"
-        write_pdf(out_path, story, title=f"Bücherliste Fächer {schoolyear_id}", footer_center=footer_center)
+        if args.confirmation:
+            # Bestätigungs-Vorlage ist pro Fach an eine reale Person adressiert
+            # (Fachkonferenzleitung) — Seitenzahl zählt daher je Fach neu, und
+            # die Fußzeile nennt das jeweilige Fach statt pauschal "Fächer".
+            write_combined_confirmation_pdf(
+                out_path, subjects, by_subject, schoolyear_id,
+                fkl_map=fkl_map, kollegium_map=kollegium_map, title=f"Bücherliste Fächer {schoolyear_id}",
+                duplex=effective_duplex,
+            )
+        else:
+            # Eine gemeinsame blank_pages-Menge über das ganze kombinierte
+            # Dokument (ein einziges PageTemplate für alle Fächer hier).
+            blank_pages: set[int] = set()
+            story: list = []
+            for i, subject in enumerate(subjects):
+                if i > 0:
+                    story.append(PageBreak())
+                story.extend(
+                    subject_story(
+                        subject, by_subject[subject], schoolyear_id,
+                        confirmation=False, fkl_map=fkl_map, kollegium_map=kollegium_map, duplex=effective_duplex,
+                        blank_pages=blank_pages,
+                    )
+                )
+            footer_center = footer_context("Fächer", schoolyear_id)
+            write_pdf(
+                out_path, story, title=f"Bücherliste Fächer {schoolyear_id}", footer_center=footer_center,
+                blank_pages=blank_pages,
+            )
         print(f"PDF gespeichert: {out_path}")
     else:
         for subject in subjects:
+            # Jedes Fach ist im split-Modus ein eigenes Dokument -> eigene
+            # blank_pages-Menge.
+            blank_pages = set()
             story = subject_story(
                 subject, by_subject[subject], schoolyear_id,
-                confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map,
+                confirmation=args.confirmation, fkl_map=fkl_map, kollegium_map=kollegium_map, duplex=effective_duplex,
+                blank_pages=blank_pages,
             )
             out_path = out_dir / f"Bücherliste {subject} {sy_label}.pdf"
-            footer_center = f"{SCHOOL_NAME} – Bücherliste {subject} (Schuljahr {schoolyear_id})"
-            write_pdf(out_path, story, title=f"Bücherliste {subject} {schoolyear_id}", footer_center=footer_center)
+            footer_center = footer_context(subject, schoolyear_id)
+            write_pdf(
+                out_path, story, title=f"Bücherliste {subject} {schoolyear_id}", footer_center=footer_center,
+                blank_pages=blank_pages,
+            )
             print(f"PDF gespeichert: {out_path}")
 
 
