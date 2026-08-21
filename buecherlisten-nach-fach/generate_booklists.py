@@ -760,7 +760,7 @@ class SubjectHeading(Flowable):
 
         if self.confirm_value:
             center_x = dx + FOOTER_CENTER_X
-            confirm_label = "Bücherliste bestätigen durch"
+            confirm_label = "Bücherlisten zu Bestätigen durch"
 
             # Label-Zeile ("Liste für"/"gültig für"-Höhe): kurzer, fester
             # Text — bei den üblichen Fach-/Jahr-Kürzeln links/rechts nie eng.
