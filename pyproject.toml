@@ -18,8 +18,6 @@ classifiers = [
 dependencies = ["requests>=2.31,<3"]
 
 [project.optional-dependencies]
-bestand = ["openpyxl>=3.1,<4", "isbnlib>=3.10", "python-dotenv>=1,<2"]
-buecherlisten = ["reportlab>=4,<5", "isbnlib>=3.10", "python-dotenv>=1,<2"]
 dev = ["pytest>=9,<10", "pytest-cov>=7,<8", "ruff>=0.8,<1", "mypy>=1.8,<2", "pip-audit>=2.7,<3"]
 
 [tool.setuptools.packages.find]
@@ -32,7 +30,6 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py310"
 line-length = 110
-extend-exclude = ["bestand- und nachbestellungen/Old - Webscraper for Excel"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

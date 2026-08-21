@@ -7,7 +7,7 @@ It is reverse engineered and intended for local school administration tooling.
 ## Installation
 
 ```bash
-python3 -m pip install -e ".[bestand,dev]"
+python3 -m pip install -e ".[dev]"
 ```
 
 `ISERV_DOMAIN` is always required. `ISERV_USERNAME` and `ISERV_PASSWORD` are
@@ -26,20 +26,21 @@ The client rejects URLs, paths and ports for `domain`; pass a bare host name.
 Requests have a configurable connect/read timeout and only safe read requests
 are retried. State-changing requests remain blocked unless `allow_writes=True`.
 
-## Inventory workbook
+## Inventory workbook and book lists
 
-The supported command is:
+The Excel inventory tooling and the per-subject book-list generator live in a
+separate repository, [`sba-bestand`](https://github.com/niklas-mlrr/sba-bestand)
+(until 2026-08-21 they were the `bestand- und nachbestellungen/` and
+`buecherlisten-nach-fach/` folders here). Clone it next to this repo:
 
-```bash
-python3 "bestand- und nachbestellungen/New - API approach/update_bestand_auto.py" \
-  --dry-run --excel "Bestand- und Nachbestellungsliste 2026.xlsx"
+```
+<any-folder>/
+├── ausleihe-api/     <- this repo (client + .env)
+└── sba-bestand/      <- Excel tooling
 ```
 
-Normal runs fail without replacing the workbook if book matching or workbook
-structure is ambiguous. Use `match_overrides` in the adjacent `config.json` to
-map a `grade|subject|hint` key to a specific ISBN. `safety_stock` is explicit
-and defaults to the current operational value of `5`; override it with
-`--safety-stock`. Successful saves make a timestamped backup next to the input.
+`ausleihe.inventory_excel` (`atomic_save_workbook`, `match_book`) stays here —
+it is library code that `sba-bestand` imports.
 
 ## Development
 
