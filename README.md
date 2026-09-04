@@ -39,8 +39,11 @@ separate repository, [`sba-bestand`](https://github.com/niklas-mlrr/sba-bestand)
 └── sba-bestand/      <- Excel tooling
 ```
 
-`ausleihe.inventory_excel` (`atomic_save_workbook`, `match_book`) stays here —
-it is library code that `sba-bestand` imports.
+`ausleihe.inventory_excel` keeps `match_book`, the ambiguity check that must not
+silently pick the first of several books. `atomic_save_workbook` moved to
+`bestand.core.excel_io` in `sba-bestand` on 2026-09-04: it touches only the
+filesystem and openpyxl, so making a durable workbook save depend on this API
+client was the wrong boundary.
 
 ## Development
 
