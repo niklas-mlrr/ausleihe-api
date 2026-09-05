@@ -3,15 +3,16 @@ Forderungen (Mahnungen/Schadensersatz) eines Schülers abrufen.
 Erfordert mod_sbl_grant_always_enrollments oder Verwalter-Rolle.
 
 Verwendung:
-  python3 examples/students/get_claims.py <id>
-  python3 examples/students/get_claims.py 2167
+  python3 -m examples.students.get_claims <id>
+  python3 -m examples.students.get_claims 2167
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
 import json
+import sys
+
+from examples._common import ForbiddenError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: get_claims.py <id>")
+    die("Verwendung: python3 -m examples.students.get_claims <id>")
 
 student_id = int(sys.argv[1])
 client = make_client()

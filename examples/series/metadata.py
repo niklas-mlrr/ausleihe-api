@@ -2,17 +2,18 @@
 Metadaten zu Buchserien abrufen: Verlage, Fächer, Jahrgangsstufen.
 
 Verwendung:
-  python3 examples/series/metadata.py publishers   # alle Verlage
-  python3 examples/series/metadata.py subjects      # alle Unterrichtsfächer
-  python3 examples/series/metadata.py grades        # Jahrgangsstufen + Serienzahl
+  python3 -m examples.series.metadata publishers   # alle Verlage
+  python3 -m examples.series.metadata subjects      # alle Unterrichtsfächer
+  python3 -m examples.series.metadata grades        # Jahrgangsstufen + Serienzahl
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
+from examples._common import die, make_client
 
 MODES = ("publishers", "subjects", "grades")
 
 if len(sys.argv) < 2 or sys.argv[1] not in MODES:
-    die(f"Verwendung: metadata.py <{'|'.join(MODES)}>")
+    die(f"Verwendung: python3 -m examples.series.metadata <{'|'.join(MODES)}>")
 
 mode = sys.argv[1]
 client = make_client()

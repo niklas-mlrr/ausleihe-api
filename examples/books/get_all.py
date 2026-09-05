@@ -2,11 +2,12 @@
 Alle Bücher abrufen.
 
 Verwendung:
-  python3 examples/books/get_all.py
-  python3 examples/books/get_all.py --deleted   # gelöschte Bücher einschließen
+  python3 -m examples.books.get_all
+  python3 -m examples.books.get_all --deleted   # gelöschte Bücher einschließen
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
+import sys
+
+from examples._common import make_client
 
 include_deleted = "--deleted" in sys.argv
 

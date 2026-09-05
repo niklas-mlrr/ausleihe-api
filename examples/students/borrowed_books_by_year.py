@@ -12,16 +12,17 @@ Ohne Angabe wird das aktuelle Schuljahr verwendet. Es werden ausschliesslich
 GET-Requests gemacht; KEINE Daten werden geaendert.
 
 Verwendung:
-  python3 examples/students/borrowed_books_by_year.py <student_id> [schuljahr]
-  python3 examples/students/borrowed_books_by_year.py 2167             # aktuelles Jahr
-  python3 examples/students/borrowed_books_by_year.py 2167 2025/2026    # bestimmtes Jahr
+  python3 -m examples.students.borrowed_books_by_year <student_id> [schuljahr]
+  python3 -m examples.students.borrowed_books_by_year 2167             # aktuelles Jahr
+  python3 -m examples.students.borrowed_books_by_year 2167 2025/2026    # bestimmtes Jahr
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, NotFoundError, die
+import sys
 from datetime import datetime, timezone
 
+from examples._common import NotFoundError, die, make_client
+
 if len(sys.argv) < 2:
-    die("Verwendung: borrowed_books_by_year.py <student_id> [schuljahr]")
+    die("Verwendung: python3 -m examples.students.borrowed_books_by_year <student_id> [schuljahr]")
 
 try:
     sid = int(sys.argv[1])

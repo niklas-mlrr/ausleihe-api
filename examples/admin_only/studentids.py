@@ -3,22 +3,24 @@ Schüler-ID-Barcode-Zuordnung abrufen oder setzen. [Admin]
 
 Verwendung:
   # Zuordnung lesen (GET):
-  python3 examples/admin_only/studentids.py <code>
-  python3 examples/admin_only/studentids.py 00015193
+  python3 -m examples.admin_only.studentids <code>
+  python3 -m examples.admin_only.studentids 00015193
 
   # Zuordnung setzen (SCHREIBEND, nur mit Freigabe):
-  AUSLEIHE_ALLOW_WRITES=1 python3 examples/admin_only/studentids.py <code> <student_id>
-  AUSLEIHE_ALLOW_WRITES=1 python3 examples/admin_only/studentids.py 00015193 2167
+  AUSLEIHE_ALLOW_WRITES=1 python3 -m examples.admin_only.studentids <code> <student_id>
+  AUSLEIHE_ALLOW_WRITES=1 python3 -m examples.admin_only.studentids 00015193 2167
 
 ACHTUNG: Das Setzen einer Zuordnung ist ein SCHREIBENDER Request gegen die
 PRODUKTION. Standardmäßig blockiert; nur mit AUSLEIHE_ALLOW_WRITES=1 freigeschaltet.
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
 import json
+import os
+import sys
+
+from examples._common import ForbiddenError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: studentids.py <code> [student_id]")
+    die("Verwendung: python3 -m examples.admin_only.studentids <code> [student_id]")
 
 code = sys.argv[1]
 want_write = len(sys.argv) >= 3

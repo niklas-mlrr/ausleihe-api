@@ -2,18 +2,20 @@
 Bücherlisten eines Schuljahrs (GET /schoolyears/:id/booklists/). [Helfer]
 
 Verwendung:
-  python3 examples/schoolyears/booklists.py <schoolyear_id>
-  python3 examples/schoolyears/booklists.py "2025/2026"
-  python3 examples/schoolyears/booklists.py current   # laufendes Schuljahr
+  python3 -m examples.schoolyears.booklists <schoolyear_id>
+  python3 -m examples.schoolyears.booklists "2025/2026"
+  python3 -m examples.schoolyears.booklists current   # laufendes Schuljahr
 
 schoolyear_id: Schuljahr im Format "YYYY/YYYY", oder "current" für das laufende.
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
 import json
+import sys
+
+from examples._common import die, make_client
 
 if len(sys.argv) < 2:
-    die('Verwendung: booklists.py <schoolyear_id>  (z.B. "2025/2026" oder "current")')
+    die('Verwendung: python3 -m examples.schoolyears.booklists <schoolyear_id>'
+        '  (z.B. "2025/2026" oder "current")')
 
 client = make_client()
 sy_id = sys.argv[1]

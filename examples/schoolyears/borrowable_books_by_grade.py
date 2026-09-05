@@ -6,15 +6,16 @@ auf. Kauf-/Arbeitshefte (borrowable=False) werden ignoriert. Rein lesend (nur GE
 
 Verwendung:
   # Aktuelles Schuljahr:
-  python3 examples/schoolyears/borrowable_books_by_grade.py
-  python3 examples/schoolyears/borrowable_books_by_grade.py "2025/2026"
+  python3 -m examples.schoolyears.borrowable_books_by_grade
+  python3 -m examples.schoolyears.borrowable_books_by_grade "2025/2026"
 
   # Nur einen Jahrgang:
-  python3 examples/schoolyears/borrowable_books_by_grade.py "2025/2026" 7
+  python3 -m examples.schoolyears.borrowable_books_by_grade "2025/2026" 7
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
 from ausleihe.exceptions import NotFoundError
+from examples._common import die, make_client
 
 
 def borrowable_books(client, sy_id: str, booklist_id: int) -> list[tuple[str, str]]:

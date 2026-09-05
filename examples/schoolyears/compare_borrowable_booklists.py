@@ -12,18 +12,19 @@ Kauf-/Arbeitshefte (borrowable=False) werden ignoriert.
 
 Verwendung:
   # Aktuelles Schuljahr gegen automatisch ermitteltes Vorjahr:
-  python3 examples/schoolyears/compare_borrowable_booklists.py
-  python3 examples/schoolyears/compare_borrowable_booklists.py "2025/2026"
+  python3 -m examples.schoolyears.compare_borrowable_booklists
+  python3 -m examples.schoolyears.compare_borrowable_booklists "2025/2026"
 
   # Explizit Jahr und Vorjahr angeben:
-  python3 examples/schoolyears/compare_borrowable_booklists.py "2025/2026" "2024/2025"
+  python3 -m examples.schoolyears.compare_borrowable_booklists "2025/2026" "2024/2025"
 
   # Auch unveränderte Jahrgänge auflisten:
-  python3 examples/schoolyears/compare_borrowable_booklists.py --all
+  python3 -m examples.schoolyears.compare_borrowable_booklists --all
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
 from ausleihe.exceptions import NotFoundError
+from examples._common import die, make_client
 
 
 def previous_schoolyear(sy_id: str) -> str:

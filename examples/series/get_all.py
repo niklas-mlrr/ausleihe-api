@@ -2,12 +2,13 @@
 Alle Buchserien abrufen, oder eine einzelne Serie per ISBN.
 
 Verwendung:
-  python3 examples/series/get_all.py
-  python3 examples/series/get_all.py <isbn>
-  python3 examples/series/get_all.py 9783507887435
+  python3 -m examples.series.get_all
+  python3 -m examples.series.get_all <isbn>
+  python3 -m examples.series.get_all 9783507887435
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, NotFoundError, die
+import sys
+
+from examples._common import NotFoundError, die, make_client
 
 client = make_client()
 

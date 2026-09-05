@@ -4,15 +4,20 @@ from __future__ import annotations
 import os
 import sys
 
-# Projektroot zum Suchpfad hinzufügen, egal von wo das Skript aufgerufen wird
+# Das ist der EINZIGE verbliebene sys.path-Eingriff in examples/. Die
+# Beispiel-Skripte selbst sind ein normales Paket (examples.<modul>) und
+# brauchen ihn nicht mehr — der hier bleibt, weil der dokumentierte
+# Nachfolgepfad "klonen, nicht installieren" ist: ohne editable install von
+# `ausleihe-api` findet Python das Paket `ausleihe` sonst nicht, egal von wo
+# `python3 -m examples....` aufgerufen wird.
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _root)
 
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(_root, ".env"))
 
-from ausleihe import AusleiheClient
-from ausleihe import AusleiheError, AuthError, ForbiddenError, NotFoundError
+from ausleihe import AusleiheClient, AusleiheError, AuthError, ForbiddenError, NotFoundError
 
 
 def make_client(allow_writes: bool = False) -> AusleiheClient:

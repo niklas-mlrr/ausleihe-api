@@ -2,11 +2,12 @@
 Alle Schüler abrufen.
 
 Verwendung:
-  python3 examples/students/get_all.py
-  python3 examples/students/get_all.py --deleted   # ausgetretene/gelöschte einschließen
+  python3 -m examples.students.get_all
+  python3 -m examples.students.get_all --deleted   # ausgetretene/gelöschte einschließen
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
+import sys
+
+from examples._common import make_client
 
 include_deleted = "--deleted" in sys.argv
 

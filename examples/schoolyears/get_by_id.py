@@ -2,15 +2,16 @@
 Einzelnes Schuljahr mit Bücherlisten-Übersicht (GET /schoolyears/:id). [Helfer]
 
 Verwendung:
-  python3 examples/schoolyears/get_by_id.py <schoolyear_id>
-  python3 examples/schoolyears/get_by_id.py "2025/2026"
+  python3 -m examples.schoolyears.get_by_id <schoolyear_id>
+  python3 -m examples.schoolyears.get_by_id "2025/2026"
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
 import json
+import sys
+
+from examples._common import die, make_client
 
 if len(sys.argv) < 2:
-    die('Verwendung: get_by_id.py <schoolyear_id>  (z.B. "2025/2026")')
+    die('Verwendung: python3 -m examples.schoolyears.get_by_id <schoolyear_id>  (z.B. "2025/2026")')
 
 client = make_client()
 sy = client.schoolyears.get_by_id(sys.argv[1])

@@ -2,11 +2,11 @@
 Eigenes Schüler-Profil abrufen (GET /me). [Helfer]
 
 Verwendung:
-  python3 examples/misc/me.py
+  python3 -m examples.misc.me
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
 import json
+
+from examples._common import make_client
 
 client = make_client()
 me = client.students.get_me()

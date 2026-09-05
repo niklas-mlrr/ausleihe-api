@@ -15,18 +15,19 @@ Rein lesend (nur GET).
 
 Verwendung:
   # Aktuelles Schuljahr gegen automatisch ermitteltes Folgejahr:
-  python3 examples/schoolyears/compare_cohort_booklists.py
-  python3 examples/schoolyears/compare_cohort_booklists.py "2025/2026"
+  python3 -m examples.schoolyears.compare_cohort_booklists
+  python3 -m examples.schoolyears.compare_cohort_booklists "2025/2026"
 
   # Explizit Basisjahr und Folgejahr:
-  python3 examples/schoolyears/compare_cohort_booklists.py "2025/2026" "2026/2027"
+  python3 -m examples.schoolyears.compare_cohort_booklists "2025/2026" "2026/2027"
 
   # Auch unveränderte Kohorten auflisten:
-  python3 examples/schoolyears/compare_cohort_booklists.py --all
+  python3 -m examples.schoolyears.compare_cohort_booklists --all
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
 from ausleihe.exceptions import NotFoundError
+from examples._common import die, make_client
 
 
 def next_schoolyear(sy_id: str) -> str:

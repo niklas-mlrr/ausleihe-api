@@ -2,14 +2,15 @@
 Alle Exemplare einer Buchserie abrufen. [Admin]
 
 Verwendung:
-  python3 examples/admin_only/series_books.py <isbn>
-  python3 examples/admin_only/series_books.py 9783507887435
+  python3 -m examples.admin_only.series_books <isbn>
+  python3 -m examples.admin_only.series_books 9783507887435
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
+import sys
+
+from examples._common import ForbiddenError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: series_books.py <isbn>")
+    die("Verwendung: python3 -m examples.admin_only.series_books <isbn>")
 
 client = make_client()
 

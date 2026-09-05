@@ -3,23 +3,25 @@ Schüler nach Name suchen.
 
 Verwendung:
   # Nach Nachname (optional zusätzlich Vorname):
-  python3 examples/students/search.py <nachname> [vorname]
-  python3 examples/students/search.py Müller
-  python3 examples/students/search.py Müller Anna
+  python3 -m examples.students.search <nachname> [vorname]
+  python3 -m examples.students.search Müller
+  python3 -m examples.students.search Müller Anna
 
   # Nur nach Vorname:
-  python3 examples/students/search.py --firstname <vorname>
-  python3 examples/students/search.py --firstname Anna
+  python3 -m examples.students.search --firstname <vorname>
+  python3 -m examples.students.search --firstname Anna
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
+from examples._common import die, make_client
 
 args = sys.argv[1:]
 lastname = ""
 firstname = ""
 
 if not args:
-    die("Verwendung: search.py <nachname> [vorname]  oder  search.py --firstname <vorname>")
+    die("Verwendung: python3 -m examples.students.search <nachname> [vorname]"
+        "  oder  python3 -m examples.students.search --firstname <vorname>")
 
 if args[0] == "--firstname":
     firstname = args[1] if len(args) > 1 else die("--firstname benötigt einen Wert.")

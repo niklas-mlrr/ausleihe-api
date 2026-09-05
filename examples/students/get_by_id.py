@@ -2,14 +2,15 @@
 Einzelnen Schüler nach ID abrufen.
 
 Verwendung:
-  python3 examples/students/get_by_id.py <id>
-  python3 examples/students/get_by_id.py 2167
+  python3 -m examples.students.get_by_id <id>
+  python3 -m examples.students.get_by_id 2167
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, NotFoundError, die
+import sys
+
+from examples._common import NotFoundError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: get_by_id.py <id>")
+    die("Verwendung: python3 -m examples.students.get_by_id <id>")
 
 client = make_client()
 

@@ -4,14 +4,15 @@ Banktransaktionen abrufen. [Admin, read-only]
 Echter Endpunkt: GET /bank/transactions/ (liefert JSON). Serverseitige Filter:
 
 Verwendung:
-  python3 examples/admin_only/transactions.py             # alle (erste 10)
-  python3 examples/admin_only/transactions.py open        # Zuordnung offen (dedicated=false)
-  python3 examples/admin_only/transactions.py assigned    # vollständig zugeordnet (dedicated=true)
-  python3 examples/admin_only/transactions.py ignored     # ausgeblendet (ignored=true)
+  python3 -m examples.admin_only.transactions             # alle (erste 10)
+  python3 -m examples.admin_only.transactions open        # Zuordnung offen (dedicated=false)
+  python3 -m examples.admin_only.transactions assigned    # vollständig zugeordnet (dedicated=true)
+  python3 -m examples.admin_only.transactions ignored     # ausgeblendet (ignored=true)
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
 import json
+import sys
+
+from examples._common import ForbiddenError, die, make_client
 
 client = make_client()
 mode = sys.argv[1] if len(sys.argv) >= 2 else None

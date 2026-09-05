@@ -7,13 +7,14 @@ vollständig ausgegeben (countComplete), noch nicht zugeordnet (countNotAssigned
 plus eine Aufschlüsselung pro Klasse (statsByForm).
 
 Verwendung:
-  python3 examples/admin_only/reorder_demand.py [schoolyear_id]
-  python3 examples/admin_only/reorder_demand.py "2025/2026"
+  python3 -m examples.admin_only.reorder_demand [schoolyear_id]
+  python3 -m examples.admin_only.reorder_demand "2025/2026"
 
 schoolyear_id: optional, Format "YYYY/YYYY" (Default = aktuelles Schuljahr).
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
+import sys
+
+from examples._common import ForbiddenError, die, make_client
 
 client = make_client()
 

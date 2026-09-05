@@ -2,14 +2,15 @@
 IServ-Nutzer suchen oder alle abrufen.
 
 Verwendung:
-  python3 examples/users/search.py                     # alle Nutzer
-  python3 examples/users/search.py <nachname>
-  python3 examples/users/search.py Müller
-  python3 examples/users/search.py --firstname <vorname>
-  python3 examples/users/search.py --firstname Anna
+  python3 -m examples.users.search                     # alle Nutzer
+  python3 -m examples.users.search <nachname>
+  python3 -m examples.users.search Müller
+  python3 -m examples.users.search --firstname <vorname>
+  python3 -m examples.users.search --firstname Anna
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
+import sys
+
+from examples._common import make_client
 
 args = sys.argv[1:]
 lastname = ""

@@ -2,15 +2,16 @@
 Einzelne Bücherliste mit vollständiger Konfiguration (GET /schoolyears/:id/booklists/:bl_id). [Helfer]
 
 Verwendung:
-  python3 examples/schoolyears/booklist_detail.py <schoolyear_id> <booklist_id>
-  python3 examples/schoolyears/booklist_detail.py "2025/2026" 42
+  python3 -m examples.schoolyears.booklist_detail <schoolyear_id> <booklist_id>
+  python3 -m examples.schoolyears.booklist_detail "2025/2026" 42
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
 import json
+import sys
+
+from examples._common import die, make_client
 
 if len(sys.argv) < 3:
-    die('Verwendung: booklist_detail.py <schoolyear_id> <booklist_id>')
+    die('Verwendung: python3 -m examples.schoolyears.booklist_detail <schoolyear_id> <booklist_id>')
 
 client = make_client()
 sy_id = sys.argv[1]

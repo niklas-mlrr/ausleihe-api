@@ -6,11 +6,11 @@ steuert das Feature-Gating (z.B. schaltet "COMPLETE" das Anmelde-/Enrollment-
 Feature frei).
 
 Verwendung:
-  python3 examples/misc/serverconfig.py
+  python3 -m examples.misc.serverconfig
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
 import json
+
+from examples._common import make_client
 
 client = make_client()
 config = client.get("/serverconfig")

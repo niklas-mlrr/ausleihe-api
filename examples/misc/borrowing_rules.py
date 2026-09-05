@@ -2,11 +2,11 @@
 Ausleihregeln abrufen (öffentlicher Endpunkt, kein Auth nötig).
 
 Verwendung:
-  python3 examples/misc/borrowing_rules.py
+  python3 -m examples.misc.borrowing_rules
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
 import re
+
+from examples._common import make_client
 
 client = make_client()
 rules = client.get_borrowing_rules()

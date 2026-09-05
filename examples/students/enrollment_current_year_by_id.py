@@ -14,15 +14,16 @@ Es werden ausschliesslich GET-Requests gemacht; KEINE Daten werden angelegt
 oder geaendert (Anmeldungen ANLEGEN waere POST/PUT -> gegen Produktion tabu).
 
 Verwendung:
-  python3 examples/students/enrollment_current_year_by_id.py <student_id> [schuljahr]
-  python3 examples/students/enrollment_current_year_by_id.py 2167             # aktuelles Jahr
-  python3 examples/students/enrollment_current_year_by_id.py 2167 2024/2025    # bestimmtes Jahr
+  python3 -m examples.students.enrollment_current_year_by_id <student_id> [schuljahr]
+  python3 -m examples.students.enrollment_current_year_by_id 2167             # aktuelles Jahr
+  python3 -m examples.students.enrollment_current_year_by_id 2167 2024/2025    # bestimmtes Jahr
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, NotFoundError, die
+import sys
+
+from examples._common import ForbiddenError, NotFoundError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: enrollment_current_year_by_id.py <student_id> [schuljahr]")
+    die("Verwendung: python3 -m examples.students.enrollment_current_year_by_id <student_id> [schuljahr]")
 
 try:
     sid = int(sys.argv[1])

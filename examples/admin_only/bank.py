@@ -2,11 +2,11 @@
 Bankverbindungen abrufen. [Admin]
 
 Verwendung:
-  python3 examples/admin_only/bank.py
+  python3 -m examples.admin_only.bank
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, ForbiddenError, die
 import json
+
+from examples._common import ForbiddenError, die, make_client
 
 client = make_client()
 

@@ -2,14 +2,15 @@
 Einzelnes Buch nach Barcode-Code abrufen.
 
 Verwendung:
-  python3 examples/books/get_by_code.py <code>
-  python3 examples/books/get_by_code.py 00015193
+  python3 -m examples.books.get_by_code <code>
+  python3 -m examples.books.get_by_code 00015193
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, NotFoundError, die
+import sys
+
+from examples._common import NotFoundError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: get_by_code.py <code>")
+    die("Verwendung: python3 -m examples.books.get_by_code <code>")
 
 code = sys.argv[1]
 client = make_client()

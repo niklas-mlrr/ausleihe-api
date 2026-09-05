@@ -2,11 +2,11 @@
 Aktuelles Schuljahr abrufen (GET /schoolyears/current). [Helfer]
 
 Verwendung:
-  python3 examples/schoolyears/current.py
+  python3 -m examples.schoolyears.current
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client
 import json
+
+from examples._common import make_client
 
 client = make_client()
 sy = client.schoolyears.get_current()

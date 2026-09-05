@@ -3,37 +3,38 @@ Bücher clientseitig filtern.
 
 Verwendung:
   # Nach ISBN filtern:
-  python3 examples/books/filter.py isbn <isbn>
-  python3 examples/books/filter.py isbn 9783507887435
+  python3 -m examples.books.filter isbn <isbn>
+  python3 -m examples.books.filter isbn 9783507887435
 
   # Nach Schüler-ID filtern:
-  python3 examples/books/filter.py student <id>
-  python3 examples/books/filter.py student 2167
+  python3 -m examples.books.filter student <id>
+  python3 -m examples.books.filter student 2167
 
   # Nur verfügbare bzw. nur ausgeliehene Bücher:
-  python3 examples/books/filter.py available
-  python3 examples/books/filter.py distributed
+  python3 -m examples.books.filter available
+  python3 -m examples.books.filter distributed
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, die
+import sys
+
+from examples._common import die, make_client
 
 MODES = ("isbn", "student", "available", "distributed")
 
 if len(sys.argv) < 2 or sys.argv[1] not in MODES:
-    die(f"Verwendung: filter.py <{'|'.join(MODES)}> [wert]")
+    die(f"Verwendung: python3 -m examples.books.filter <{'|'.join(MODES)}> [wert]")
 
 mode = sys.argv[1]
 client = make_client()
 
 if mode == "isbn":
     if len(sys.argv) < 3:
-        die("Verwendung: filter.py isbn <isbn>")
+        die("Verwendung: python3 -m examples.books.filter isbn <isbn>")
     books = client.books.filter_by_isbn(sys.argv[2])
     label = f"ISBN {sys.argv[2]}"
 
 elif mode == "student":
     if len(sys.argv) < 3:
-        die("Verwendung: filter.py student <id>")
+        die("Verwendung: python3 -m examples.books.filter student <id>")
     books = client.books.filter_by_student(int(sys.argv[2]))
     label = f"Schüler-ID {sys.argv[2]}"
 

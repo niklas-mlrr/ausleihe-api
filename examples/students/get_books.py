@@ -2,14 +2,15 @@
 Ausgeliehene Bücher eines Schülers abrufen.
 
 Verwendung:
-  python3 examples/students/get_books.py <id>
-  python3 examples/students/get_books.py 2167
+  python3 -m examples.students.get_books <id>
+  python3 -m examples.students.get_books 2167
 """
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from _common import make_client, NotFoundError, die
+import sys
+
+from examples._common import NotFoundError, die, make_client
 
 if len(sys.argv) < 2:
-    die("Verwendung: get_books.py <id>")
+    die("Verwendung: python3 -m examples.students.get_books <id>")
 
 student_id = int(sys.argv[1])
 client = make_client()
