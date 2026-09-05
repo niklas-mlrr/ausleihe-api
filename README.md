@@ -45,6 +45,33 @@ silently pick the first of several books. `atomic_save_workbook` moved to
 filesystem and openpyxl, so making a durable workbook save depend on this API
 client was the wrong boundary.
 
+## Typing
+
+The package ships `ausleihe/py.typed`, so consumers type-check against the real
+signatures rather than against `Any`. Two things are needed for that, and the
+second one is easy to miss:
+
+1. The marker itself, plus its entry in `[tool.setuptools.package-data]` —
+   `packages.find` only collects `.py` files, so without it the marker is
+   missing from the wheel.
+2. `mypy_path = "../ausleihe-api"` **in the consumer**. An editable install by
+   setuptools puts no package directory into `site-packages`, only an import
+   finder (`__editable___iserv_ausleihe_api_0_2_0_finder.py` plus a `.pth`).
+   mypy reads `sys.path`, not the runtime import hooks, so it does not see the
+   package at all and silently falls back to `Any`.
+
+Both sibling repos (`sba-bestand`, `sba-dashboard`) carry that path and no
+longer list `ausleihe.*` under `ignore_missing_imports`.
+
+**After setting this up, prove the types arrive with `reveal_type` — never with
+the absence of errors.** A green run is exactly what an invisible package
+produces too.
+
+`disallow_untyped_defs` is on here because the marker is a promise to every
+consumer. Without it, mypy skips an unannotated function including its body,
+so the check would stop silently at the first unannotated newcomer while still
+reporting success.
+
 ## Development
 
 ```bash

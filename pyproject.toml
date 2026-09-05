@@ -23,6 +23,16 @@ dev = ["pytest>=9,<10", "pytest-cov>=7,<8", "ruff>=0.8,<1", "mypy>=1.8,<2", "pip
 [tool.setuptools.packages.find]
 include = ["ausleihe*"]
 
+# PEP 561 marker.  Without this empty file in the wheel every type checker
+# ignores the annotations in this package: for mypy in the two sibling repos
+# AusleiheClient, AuthError, ForbiddenError, TransportError, NotFoundError and
+# match_book were plain `Any` -- they stood in the signatures for the reader,
+# nothing was checked at the package boundary.  package-data carries the marker
+# into the wheel because packages.find only collects .py files; verified
+# against the built wheel, not the source tree.
+[tool.setuptools.package-data]
+ausleihe = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -34,10 +44,28 @@ line-length = 110
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
+# mypy is no longer optional here, it backs the py.typed marker above: the
+# marker is a promise to every consumer ("the annotations in here are right"),
+# and both sibling repos now rely on it instead of treating the client and its
+# exception types as `Any`.  Without a check *here* the promise would be
+# uncovered -- a broken annotation would surface in sba-bestand or
+# sba-dashboard rather than in the repo that caused it.
 [tool.mypy]
 python_version = "3.10"
+
+# On ausleihe/ and not on tests/: what gets checked is what the wheel ships and
+# what py.typed covers.  The tests live on monkeypatched fakes and dummy
+# session objects whose types say nothing worth checking.
 files = ["ausleihe"]
+
+# This is the point of the change.  With disallow_untyped_defs off, mypy skips
+# an unannotated function *including its body* -- the check would have stopped
+# silently at the first unannotated newcomer while still reporting success.
+# The package already passed with these on before they were written down here
+# (measured 2026-09-05, 12 files), so this records the state rather than
+# demanding a cleanup.  Same reasoning as in the two sibling repos.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-disallow_untyped_defs = false
-no_implicit_optional = true
